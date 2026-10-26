@@ -145,8 +145,11 @@ bool MemoryDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view,
 void MemoryModel::refreshStack() {
     if (!engine->paused() || !engine->registers.contains("rsp")) return;
     const auto previous = stackBytes;
-    stackBase = engine->registers["rsp"];
-    haveStack = true;
+    if (!haveStack) {
+        // Keep the initial RSP on the bottom row as the stack grows upward in the view.
+        stackBase = engine->registers["rsp"] - 9 * 8;
+        haveStack = true;
+    }
     stackBytes.clear();
     modified.clear();
     const int epoch = ++generation;
