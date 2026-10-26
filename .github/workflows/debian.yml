@@ -35,7 +35,7 @@ jobs:
       - name: Install and launch the package
         run: |
           exec > >(tee "$RUNNER_TEMP/asm101-install.log") 2>&1
-          trap 'tail -40 "$RUNNER_TEMP/asm101-install.log" | while IFS= read -r line; do printf "::error::%s\n" "$line"; done' ERR
+          trap 'printf "::error::Installer check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND"; tail -8 "$RUNNER_TEMP/asm101-install.log" | tac | while IFS= read -r line; do printf "::error::%s\n" "$line"; done' ERR
           install_dir=$(mktemp -d /tmp/asm101-install.XXXXXX)
           chmod 755 "$install_dir"
           install -m 644 dist/*.deb "$install_dir/"
