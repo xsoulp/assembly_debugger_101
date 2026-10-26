@@ -2,6 +2,35 @@
 
 A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Uses NASM, GNU ld and a real asynchronous GDB/MI2 session. The dark three-panel layout follows `mockup.png`; the RAM view follows the brief's two logical columns, with eight individually painted bytes per row. Flags remain visible below the registers.
 
+![ASM101 debugging a NASM program, showing source code, registers, RAM and stack](docs/asm101-screenshot.png)
+
+## Install the Debian package (Ubuntu 24.04 amd64)
+
+Download `asm101_1.0-1_amd64.deb` from the [v1.0 release assets](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0), then install it with:
+
+```sh
+asm101_install_dir=$(mktemp -d /tmp/asm101-install.XXXXXX)
+chmod 755 "$asm101_install_dir"
+install -m 644 ./asm101_1.0-1_amd64.deb "$asm101_install_dir/"
+sudo apt install "$asm101_install_dir/asm101_1.0-1_amd64.deb"
+```
+
+APT installs the declared Qt 6, NASM, binutils and GDB dependencies. Launch ASM101 from the applications menu or run `asm101`. The installed example is in `/usr/share/asm101/examples/`; Save/Build prompts for an editable copy when that file is read-only.
+
+Staging the package in a readable temporary directory lets APT's `_apt` user access it, avoiding the unsandboxed-download warning when your home directory is private.
+
+To build the package locally on Ubuntu 24.04, install the build dependencies first:
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential cmake ninja-build qt6-base-dev nasm binutils gdb
+./packaging/build-deb.sh
+```
+
+If CMake cannot find `Qt6Config.cmake`, install `qt6-base-dev` and run the script again. The Qt runtime libraries installed by the `.deb` do not include the development files needed to compile the application.
+
+The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0 release. The `v1.0` tag identifies the source used to build the current release assets.
+
 ## Build and run (Ubuntu 24.04)
 
 ```sh

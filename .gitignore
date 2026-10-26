@@ -1,2 +1,4 @@
 /build/
 *.o
+/build-deb/
+/dist/

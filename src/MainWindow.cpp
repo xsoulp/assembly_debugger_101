@@ -91,7 +91,7 @@ MainWindow::MainWindow(){
     connect(&engine,&DebuggerEngine::error,this,[this](QString s){cancelMove();showError(s);engine.stop();});
     connect(&builder,&QProcess::errorOccurred,this,[this](auto){building=false;editor->setReadOnly(false);showError(builder.errorString());syncActions();});
     connect(editor,&QPlainTextEdit::textChanged,this,[this]{syncActions();});
-    QFile f(EXAMPLE_PATH);if(f.open(QIODevice::ReadOnly)){editor->setPlainText(QString::fromUtf8(f.readAll()));sourcePath=EXAMPLE_PATH;editor->document()->setModified(false);sourceTitle->setText("SOURCE CODE · "+QFileInfo(sourcePath).fileName());}
+    QFile f(EXAMPLE_PATH);if(f.open(QIODevice::ReadOnly)){editor->setPlainText(QString::fromUtf8(f.readAll()));sourcePath=QFileInfo(EXAMPLE_PATH).isWritable()?QString(EXAMPLE_PATH):QString();editor->document()->setModified(false);sourceTitle->setText("SOURCE CODE · "+QFileInfo(EXAMPLE_PATH).fileName());}
     auto authorship = new QLabel("Luis Pinto · @xsoulp · 2026");
     authorship->setObjectName("authorship");
     statusBar()->addPermanentWidget(authorship);
@@ -99,7 +99,7 @@ MainWindow::MainWindow(){
 }
 void MainWindow::syncActions(){buildAction->setEnabled(!active&&!building);startAction->setEnabled(!active&&!building&&!executable.isEmpty()&&builtSource==editor->toPlainText());stepAction->setEnabled(active&&engine.paused()&&!moveBusy);stopAction->setEnabled(active);}
 void MainWindow::showError(QString text){statusBar()->showMessage(text);QMessageBox::warning(this,"ASM101",text);}
-bool MainWindow::save(){if(sourcePath.isEmpty())sourcePath=QFileDialog::getSaveFileName(this,"Save assembly",{},"NASM source (*.asm)");if(sourcePath.isEmpty())return false;QSaveFile f(sourcePath);if(!f.open(QIODevice::WriteOnly)||f.write(editor->toPlainText().toUtf8())<0||!f.commit()){showError(f.errorString());return false;}editor->document()->setModified(false);sourceTitle->setText("SOURCE CODE · "+QFileInfo(sourcePath).fileName());return true;}
+bool MainWindow::save(){if(sourcePath.isEmpty())sourcePath=QFileDialog::getSaveFileName(this,"Save assembly",QDir::home().filePath("example.asm"),"NASM source (*.asm)");if(sourcePath.isEmpty())return false;QSaveFile f(sourcePath);if(!f.open(QIODevice::WriteOnly)||f.write(editor->toPlainText().toUtf8())<0||!f.commit()){showError(f.errorString());return false;}editor->document()->setModified(false);sourceTitle->setText("SOURCE CODE · "+QFileInfo(sourcePath).fileName());return true;}
 bool MainWindow::confirmDiscard(){if(!editor->document()->isModified())return true;auto r=QMessageBox::question(this,"Unsaved source","Save changes to the assembly source?",QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel);return r==QMessageBox::Discard||(r==QMessageBox::Save&&save());}
 void MainWindow::open(){if(active||building)return;if(!confirmDiscard())return;QString p=QFileDialog::getOpenFileName(this,"Open assembly",{},"NASM source (*.asm)");if(p.isEmpty())return;QFile f(p);if(!f.open(QIODevice::ReadOnly)){showError(f.errorString());return;}sourcePath=p;editor->setPlainText(QString::fromUtf8(f.readAll()));editor->document()->setModified(false);editor->setExecutionLine(0);executable.clear();sourceTitle->setText("SOURCE CODE · "+QFileInfo(p).fileName());syncActions();}
 void MainWindow::build(){

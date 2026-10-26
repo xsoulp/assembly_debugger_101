@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ASM101
+Comment=Learn x86-64 assembly with a visual debugger
+Exec=asm101
+TryExec=asm101
+Icon=asm101
+Terminal=false
+Categories=Development;Debugger;
+Keywords=assembly;NASM;x86-64;debugger;GDB;
