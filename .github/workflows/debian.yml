@@ -24,7 +24,7 @@ jobs:
       - name: Install build and debugger dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev nasm binutils gdb gh desktop-file-utils
+          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev nasm binutils gdb gh desktop-file-utils python3-gi gir1.2-gtk-3.0 xvfb xauth
       - name: Build and test
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -39,6 +39,8 @@ jobs:
           install -m 644 dist/*.deb "$install_dir/"
           sudo apt-get install -y "$install_dir"/*.deb
           desktop-file-validate /usr/share/applications/asm101.desktop
+          desktop_test_home=$(mktemp -d)
+          XDG_DATA_HOME="$desktop_test_home" XDG_DATA_DIRS=/usr/share xvfb-run -a /usr/bin/python3 tests/desktop_integration.py
           set +e
           QT_QPA_PLATFORM=offscreen timeout 3s asm101
           status=$?

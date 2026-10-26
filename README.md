@@ -6,13 +6,13 @@ A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Us
 
 ## Install the Debian package (Ubuntu 24.04 amd64)
 
-Download the `.deb` from the [v1.0.1 release](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0.1). Open a terminal in the download folder and run:
+Download the `.deb` from the [v1.0.2 release](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0.2). Open a terminal in the download folder and run:
 
 ```sh
-sudo apt install ./asm101_1.0.1-1_amd64.deb
+sudo apt install ./asm101_1.0.2-1_amd64.deb
 ```
 
-APT installs the declared Qt 6, NASM, binutils and GDB dependencies. Launch ASM101 from the applications menu or run `asm101`. The installed example is in `/usr/share/asm101/examples/`; Save/Build prompts for an editable copy when that file is read-only.
+APT installs the declared Qt 6, NASM, binutils and GDB dependencies. Installation refreshes the application and icon caches automatically. Search for **ASM101** in the applications menu or run `asm101`. The installed example is in `/usr/share/asm101/examples/`; Save/Build prompts for an editable copy when that file is read-only.
 
 ## Build and run (Ubuntu 24.04)
 
@@ -54,7 +54,7 @@ sudo apt-get install build-essential cmake ninja-build qt6-base-dev nasm binutil
 
 The Qt runtime libraries installed by the `.deb` do not include the development files needed to compile the application.
 
-The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0.1 release. The `v1.0.1` tag identifies the source used to build the current release assets.
+The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0.2 release. The `v1.0.2` tag identifies the source used to build the current release assets.
 
 ## About the author
 
