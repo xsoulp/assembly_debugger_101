@@ -1,35 +1,18 @@
-# ASM101 v1.0
+# ASM101
 
-A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Uses NASM, GNU ld and a real asynchronous GDB/MI2 session. The dark three-panel layout follows `mockup.png`; the RAM view follows the brief's two logical columns, with eight individually painted bytes per row. Flags remain visible below the registers.
+A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Uses NASM, GNU ld and a real asynchronous GDB/MI2 session.
 
 ![ASM101 debugging a NASM program, showing source code, registers, RAM and stack](docs/asm101-screenshot.png)
 
 ## Install the Debian package (Ubuntu 24.04 amd64)
 
-Download `asm101_1.0-1_amd64.deb` from the [v1.0 release assets](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0), then install it with:
+Download the `.deb` from the [v1.0.1 release](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0.1). Open a terminal in the download folder and run:
 
 ```sh
-asm101_install_dir=$(mktemp -d /tmp/asm101-install.XXXXXX)
-chmod 755 "$asm101_install_dir"
-install -m 644 ./asm101_1.0-1_amd64.deb "$asm101_install_dir/"
-sudo apt install "$asm101_install_dir/asm101_1.0-1_amd64.deb"
+sudo apt install ./asm101_1.0.1-1_amd64.deb
 ```
 
 APT installs the declared Qt 6, NASM, binutils and GDB dependencies. Launch ASM101 from the applications menu or run `asm101`. The installed example is in `/usr/share/asm101/examples/`; Save/Build prompts for an editable copy when that file is read-only.
-
-Staging the package in a readable temporary directory lets APT's `_apt` user access it, avoiding the unsandboxed-download warning when your home directory is private.
-
-To build the package locally on Ubuntu 24.04, install the build dependencies first:
-
-```sh
-sudo apt-get update
-sudo apt-get install build-essential cmake ninja-build qt6-base-dev nasm binutils gdb
-./packaging/build-deb.sh
-```
-
-If CMake cannot find `Qt6Config.cmake`, install `qt6-base-dev` and run the script again. The Qt runtime libraries installed by the `.deb` do not include the development files needed to compile the application.
-
-The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0 release. The `v1.0` tag identifies the source used to build the current release assets.
 
 ## Build and run (Ubuntu 24.04)
 
@@ -59,20 +42,22 @@ Plain `MOV` instructions animate the transferred hexadecimal value between visib
 
 The status bar reports build and execution state; errors appear in native dialogs. Inferior terminal input/output is not presented in this first version. Stop terminates GDB and its inferior; there is no separate pause control. Source-level breakpoint management, editing process state, multithreaded and remote debugging are outside this version's scope.
 
-## Verification
+## Build the Debian package (Ubuntu 24.04)
+
+To build the package locally on Ubuntu 24.04, install the build dependencies first:
 
 ```sh
-ctest --test-dir build --output-on-failure
+sudo apt-get update
+sudo apt-get install build-essential cmake ninja-build qt6-base-dev nasm binutils gdb
+./packaging/build-deb.sh
 ```
 
-The backend test assembles and links the fixed fixture in `tests/example.asm`, verifies the initial source mapping, registers, flags and memory, checks that RIP advances by the exact previous instruction length, verifies RAX = 10 then 15, verifies the memory write, and steps through process exit. The offscreen Qt GUI test exercises Build, Start, Step through exit, restart and Stop; it checks source highlighting, changed register/byte indicators and memory reset on restart. It writes a GUI capture to `/tmp/asm101-test.png`.
+The Qt runtime libraries installed by the `.deb` do not include the development files needed to compile the application.
 
-A further edge test checks two instructions mapped to one source line, changing ZF, initial and written `.bss`, all four ELF sections, and section colors across a boundary within one row.
+The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0.1 release. The `v1.0.1` tag identifies the source used to build the current release assets.
 
-The variable-label GUI test checks that `v1`, `v2`, `v3` sit above the actual `28 64 50` bytes, verifies the full-address tooltip and row heights, steps until `resultado` changes to `49`, and checks labels after restart. It also verifies MOV values, direction, indexed and RIP-relative decoding, partial registers, Step locking and cancellation with Stop. Screenshots are `/tmp/asm101-variables.png`, `/tmp/asm101-mov.png`, and `/tmp/asm101-add.png`.
+## About the author
 
-The stack GUI test verifies all ten rows are visible, PUSH/POP values and addresses, writes via `[rsp]`, byte-change highlights, invalid RSP handling, and restart. Its screenshot is `/tmp/asm101-stack.png`.
+Created by **Luis Pinto** · [@xsoulp](https://github.com/xsoulp) · 2026.
 
-GDB tests need permission to trace child processes; restricted containers/sandboxes may prevent this. Offscreen checks do not verify a physical desktop's font rendering, mouse-driven splitter resizing, file-dialog interaction, or classroom readability. Those require a manual desktop check.
-
-Author: Luis Pinto · @xsoulp · 2026.
+Contact: [xsoulp@gmail.com](mailto:xsoulp@gmail.com).
