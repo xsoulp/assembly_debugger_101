@@ -43,10 +43,8 @@ jobs:
           desktop-file-validate /usr/share/applications/asm101.desktop
           desktop_test_home=$(mktemp -d)
           XDG_DATA_HOME="$desktop_test_home" XDG_DATA_DIRS=/usr/share xvfb-run -a /usr/bin/python3 tests/desktop_integration.py
-          set +e
-          QT_QPA_PLATFORM=offscreen timeout 3s asm101
-          status=$?
-          set -e
+          status=0
+          QT_QPA_PLATFORM=offscreen timeout 3s asm101 || status=$?
           test "$status" -eq 124
       - uses: actions/upload-artifact@v4
         with:
