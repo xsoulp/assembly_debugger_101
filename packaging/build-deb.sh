@@ -21,5 +21,7 @@ mkdir -p "$project_dir/dist"
 cpack --config "$project_dir/build-deb/CPackConfig.cmake" -G DEB -B "$project_dir/dist"
 (
   cd "$project_dir/dist"
-  sha256sum asm101_*.deb > SHA256SUMS
+  version=$(sed -n 's/^project(ASM101 VERSION \([^ ]*\) LANGUAGES CXX).*$/\1/p' "$project_dir/CMakeLists.txt")
+  test -n "$version"
+  sha256sum "asm101_${version}-"*.deb > SHA256SUMS
 )
