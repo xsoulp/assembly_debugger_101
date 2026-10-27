@@ -76,19 +76,19 @@ int main(int argc, char **argv) {
             "Missing authorship signature");
     RegisterModel parts;
     parts.updateValues({{"rax", 0xffffffffffffffffULL}, {"rbx", 0x100}, {"rcx", 0x1234}, {"rdx", 0xabcd}});
-    require(parts.data(parts.index(0, 2)).toString() == "AX:65535   AH:255 AL:255" &&
-            parts.data(parts.index(1, 2)).toString() == "BX:256   BH:1 BL:0" &&
-            parts.data(parts.index(2, 2)).toString() == "CX:4660   CH:18 CL:52" &&
-            parts.data(parts.index(3, 2)).toString() == "DX:43981   DH:171 DL:205",
+    require(parts.data(parts.index(0, 2)).toString() == "AX: 65535  AH: 255  AL: 255" &&
+            parts.data(parts.index(1, 2)).toString() == "BX:   256  BH:   1  BL:   0" &&
+            parts.data(parts.index(2, 2)).toString() == "CX:  4660  CH:  18  CL:  52" &&
+            parts.data(parts.index(3, 2)).toString() == "DX: 43981  DH: 171  DL: 205",
             "Incorrect unsigned decimal register parts");
     parts.setSignedDecimal(true);
-    require(parts.data(parts.index(0, 2)).toString() == "AX:-1   AH:-1 AL:-1" &&
-            parts.data(parts.index(1, 2)).toString() == "BX:256   BH:1 BL:0" &&
-            parts.data(parts.index(3, 2)).toString() == "DX:-21555   DH:-85 DL:-51",
+    require(parts.data(parts.index(0, 2)).toString() == "AX:    -1  AH:  -1  AL:  -1" &&
+            parts.data(parts.index(1, 2)).toString() == "BX:   256  BH:   1  BL:   0" &&
+            parts.data(parts.index(3, 2)).toString() == "DX:-21555  DH: -85  DL: -51",
             "Incorrect signed byte or word interpretation");
     parts.updateValues({{"rax", 0x800080}, {"rbx", 0x8000}});
-    require(parts.data(parts.index(0, 2)).toString() == "AX:128   AH:0 AL:-128" &&
-            parts.data(parts.index(1, 2)).toString() == "BX:-32768   BH:-128 BL:0",
+    require(parts.data(parts.index(0, 2)).toString() == "AX:   128  AH:   0  AL:-128" &&
+            parts.data(parts.index(1, 2)).toString() == "BX:-32768  BH:-128  BL:   0",
             "Incorrect signed minimum boundaries");
     action("Build")->trigger();
     require(wait([&] { return action("Start")->isEnabled(); }), "Build failed");
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
         require(wait([&] { return action("Step")->isEnabled(); }), "Step failed");
         require(!overlay->isVisible(), "Overlay left visible after completion");
         if (step == 2)
-            require(registerModel->data(registerModel->index(0, 2)).toString().startsWith("AX:140   AH:0 AL:140"),
+            require(registerModel->data(registerModel->index(0, 2)).toString().startsWith("AX:   140  AH:   0  AL: 140"),
                     "ADD result does not match decimal register parts");
         if (step == 2) {
             auto toggle = window.findChild<QCheckBox *>("signedDecimalToggle");
@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
             const QString originalHex = registerModel->data(registerModel->index(0, 1)).toString();
             toggle->click();
             require(toggle->text() == "Signed" &&
-                    registerModel->data(registerModel->index(0, 2)).toString() == "AX:140   AH:0 AL:-116",
+                    registerModel->data(registerModel->index(0, 2)).toString() == "AX:   140  AH:   0  AL:-116",
                     "Signed toggle did not reinterpret AL");
             require(registerModel->values == actualRegisters &&
                     registerModel->data(registerModel->index(0, 1)).toString() == originalHex,
@@ -178,14 +178,14 @@ int main(int argc, char **argv) {
             window.grab().save("/tmp/asm101-signed.png");
             toggle->click();
             require(toggle->text() == "Unsigned" &&
-                    registerModel->data(registerModel->index(0, 2)).toString() == "AX:140   AH:0 AL:140",
+                    registerModel->data(registerModel->index(0, 2)).toString() == "AX:   140  AH:   0  AL: 140",
                     "Unsigned toggle did not restore decimal display");
         }
     }
     require(wait([&] { return memory->byte(addresses["resultado"]) == 0x49; }), "Missing division result");
-    require(registerModel->data(registerModel->index(0, 2)).toString() == "AX:329   AH:1 AL:73",
+    require(registerModel->data(registerModel->index(0, 2)).toString() == "AX:   329  AH:   1  AL:  73",
             "Incorrect decimal AL/AH/AX after DIV");
-    require(registerModel->data(registerModel->index(1, 2)).toString() == "BX:3   BH:0 BL:3",
+    require(registerModel->data(registerModel->index(1, 2)).toString() == "BX:     3  BH:   0  BL:   3",
             "Incorrect decimal BL/BH/BX");
     require(memory->changed(addresses["resultado"]) &&
             memory->symbolsAt(addresses["resultado"]).contains("resultado"), "Label or changed-byte highlight lost");

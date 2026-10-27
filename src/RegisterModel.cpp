@@ -16,8 +16,10 @@ QVariant RegisterModel::data(const QModelIndex &index, int role) const {
                 return signedDecimal && (part & (qint64(1) << (bits - 1)))
                     ? part - (qint64(1) << bits) : part;
             };
-            return QString("%1X:%4   %1H:%3 %1L:%2")
-                .arg(family).arg(decimal(value, 8)).arg(decimal(value >> 8, 8)).arg(decimal(value, 16));
+            // Reserve five word digits plus a sign; byte fields also include room for a sign.
+            return QString("%1X:%2  %1H:%3  %1L:%4")
+                .arg(family).arg(decimal(value, 16), 6)
+                .arg(decimal(value >> 8, 8), 4).arg(decimal(value, 8), 4);
         }
         if (!values.contains(name))
             return QString("—");
