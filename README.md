@@ -15,6 +15,8 @@ cmake --build build
 
 The included `examples/example.asm` opens at startup. Open another `.asm` file with Ctrl+O. Save with Ctrl+S. Build (F7), Start (F5), then Step (F10) to execute exactly one machine instruction. Stop is Shift+F5. GDB stops at a temporary `_start` breakpoint before the first instruction. Source remains read-only while building or debugging. Unsaved edits can be saved or discarded when opening another file or closing.
 
+Use **Light mode** in the top-right corner to switch to a white background with dark text for classroom projection. Click it again to return to dark mode. Both themes include syntax colours, execution highlights, registers, RAM and stack.
+
 Build saves the editor contents and runs `nasm -f elf64 -g -F dwarf` and `ld` asynchronously, using a temporary directory for object/executable artifacts. It never substitutes generated source. Rebuild after changing the source. NASM includes resolve relative to the source directory. The current version supports static, non-PIE ELF64 executables with `_start`.
 
 ## What the displays mean

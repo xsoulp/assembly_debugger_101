@@ -1,4 +1,5 @@
 #include "MemoryModel.h"
+#include "Theme.h"
 #include <QPainter>
 #include <QTimer>
 #include <QHelpEvent>
@@ -16,7 +17,7 @@ int MemoryModel::rowForAddress(quint64 address) const {
     return -1;
 }
 bool MemoryModel::validAddress(quint64 a)const{if(mode==Stack)return haveStack&&a>=stackBase&&a-stackBase<80;for(auto s:engine->sections)if(a>=s.address&&a-s.address<s.size)return true;return false;}
-QColor MemoryModel::sectionColor(quint64 a)const{if(mode==Stack)return QColor("#213140");for(auto s:engine->sections)if(a>=s.address&&a-s.address<s.size){if(s.name==".text")return QColor("#142e4d");if(s.name==".rodata")return QColor("#30203e");if(s.name==".data")return QColor("#123c32");return QColor("#443719");}return QColor("#101820");}
+QColor MemoryModel::sectionColor(quint64 a)const{if(mode==Stack)return themeColor("#213140", "#e8edf3");for(auto s:engine->sections)if(a>=s.address&&a-s.address<s.size){if(s.name==".text")return themeColor("#142e4d", "#dceaff");if(s.name==".rodata")return themeColor("#30203e", "#eee0f5");if(s.name==".data")return themeColor("#123c32", "#d9f0e2");return themeColor("#443719", "#fff0c9");}return themeColor("#101820", "#ffffff");}
 void MemoryModel::resetSections(){if(mode==Stack){beginResetModel();++generation;haveStack=false;stackBytes.clear();modified.clear();endResetModel();return;}beginResetModel();++generation;cache.clear();requested.clear();modified.clear();spans.clear();rows=0;for(auto s:engine->sections){quint64 base=s.address&~quint64(7),end=(s.address+s.size+7)&~quint64(7);if(!spans.isEmpty()){auto &last=spans.last();quint64 prevEnd=last.base+last.rows*8;if(base<=prevEnd){int extra=int(qMin<quint64>((end>prevEnd?(end-prevEnd)/8:0),INT_MAX-rows));last.rows+=extra;rows+=extra;continue;}}if(rows>0)++rows;quint64 n=qMin<quint64>((end-base)/8,INT_MAX-rows);spans.append({base,n,rows});rows+=int(n);}endResetModel();}
 void MemoryModel::fetch(quint64 page,bool compare){
     if(requested.contains(page)||!engine->paused())return;
@@ -78,12 +79,12 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
     }
     p->save();
     p->setClipRect(o.rect);
-    p->fillRect(o.rect, QColor("#101820"));
+    p->fillRect(o.rect, themeColor("#101820", "#ffffff"));
     p->setFont(o.font);
     const bool annotated = m->hasSymbols(i.row());
     const int labelHeight = annotated ? o.fontMetrics.height() + 2 : 0;
     if (i.column() == 0) {
-        p->setPen(QColor("#99b6d6"));
+        p->setPen(themeColor("#99b6d6", "#344a60"));
         p->drawText(o.rect.adjusted(10, labelHeight, 0, 0), Qt::AlignVCenter, m->data(i).toString());
     } else {
         const int width = byteWidth(o.fontMetrics, o.rect.width());
@@ -93,15 +94,15 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
                           width - 2, o.rect.height() - labelHeight - 2);
             p->fillRect(r, m->sectionColor(a + n));
             if (m->current(a + n)) {
-                p->setPen(QColor("#ead55e"));
+                p->setPen(themeColor("#ead55e", "#916000"));
                 p->drawRect(r.adjusted(0, 0, -1, -1));
             }
             p->setFont(o.font);
-            p->setPen(m->changed(a + n) ? QColor("#64f0a0") : QColor("#e0e8f1"));
+            p->setPen(m->changed(a + n) ? themeColor("#64f0a0", "#006b35") : themeColor("#e0e8f1", "#17212b"));
             const int b = m->byte(a + n);
             p->drawText(r, Qt::AlignCenter, b < 0 ? "??" : QString("%1").arg(b, 2, 16, QChar('0')).toUpper());
             if (m->changed(a + n))
-                p->fillRect(r.adjusted(2, r.height() - 3, -2, 0), QColor("#64f0a0"));
+                p->fillRect(r.adjusted(2, r.height() - 3, -2, 0), themeColor("#64f0a0", "#006b35"));
 
             const auto names = m->symbolsAt(a + n);
             if (!names.isEmpty()) {
@@ -110,7 +111,7 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
                 QFont labelFont = o.font;
                 if (labelFont.pointSizeF() > 1) labelFont.setPointSizeF(labelFont.pointSizeF() - 1);
                 p->setFont(labelFont);
-                p->setPen(QColor("#a8d8c3"));
+                p->setPen(themeColor("#a8d8c3", "#205e40"));
                 const QRect label(x + n * width + 2, o.rect.y(), (next - n) * width - 4, labelHeight);
                 p->drawText(label, Qt::AlignLeft | Qt::AlignVCenter,
                             QFontMetrics(labelFont).elidedText(names.join(" / "), Qt::ElideRight, label.width()));

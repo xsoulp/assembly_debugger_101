@@ -1,4 +1,5 @@
 #include "RegisterModel.h"
+#include "Theme.h"
 #include <QColor>
 
 QVariant RegisterModel::data(const QModelIndex &index, int role) const {
@@ -34,9 +35,9 @@ QVariant RegisterModel::data(const QModelIndex &index, int role) const {
         return "0x" + hex;
     }
     if (role == Qt::ForegroundRole)
-        return QColor(name == "rip" ? "#f4d65e" : "#c9d9e9");
+        return (name == "rip" ? themeColor("#f4d65e", "#775100") : themeColor("#c9d9e9", "#17212b"));
     if (role == Qt::BackgroundRole && changed.contains(name))
-        return QColor("#194630");
+        return themeColor("#194630", "#d5efdf");
     return {};
 }
 

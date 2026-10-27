@@ -2,6 +2,7 @@
 #include "AssemblyEditor.h"
 #include "MemoryModel.h"
 #include "RegisterModel.h"
+#include "Theme.h"
 #include <QSplitter>
 #include <QTableView>
 #include <QHeaderView>
@@ -49,7 +50,7 @@ MainWindow::MainWindow(){
         signedToggle->setText(enabled ? "Signed" : "Unsigned");
     });
     rl->addWidget(new QLabel("FLAGS"));flags=new QLabel("CF —    ZF —    SF —    OF —<br>RFLAGS —");flags->setTextFormat(Qt::RichText);flags->setMinimumHeight(65);rl->addWidget(flags);left->addWidget(regs);
-    auto mem=new QWidget;auto ml=new QVBoxLayout(mem);ml->setContentsMargins(0,0,0,0);ml->addWidget(new QLabel("RAM · PROCESS MEMORY"));auto legend=new QLabel("<span style='color:#72aef5'>■ .text</span>　<span style='color:#c291df'>■ .rodata</span>　<span style='color:#70cba2'>■ .data</span>　<span style='color:#d8b15e'>■ .bss</span>");ml->addWidget(legend);ram=new QTableView;ram->setObjectName("ramView");memory=new MemoryModel(&engine,this);ram->setModel(memory);ram->setItemDelegate(new MemoryDelegate(ram));ram->verticalHeader()->hide();ram->verticalHeader()->setDefaultSectionSize(28);connect(memory,&QAbstractItemModel::modelReset,this,[this]{
+    auto mem=new QWidget;auto ml=new QVBoxLayout(mem);ml->setContentsMargins(0,0,0,0);ml->addWidget(new QLabel("RAM · PROCESS MEMORY"));memoryLegend=new QLabel;ml->addWidget(memoryLegend);ram=new QTableView;ram->setObjectName("ramView");memory=new MemoryModel(&engine,this);ram->setModel(memory);ram->setItemDelegate(new MemoryDelegate(ram));ram->verticalHeader()->hide();ram->verticalHeader()->setDefaultSectionSize(28);connect(memory,&QAbstractItemModel::modelReset,this,[this]{
         const int height = ram->fontMetrics().height() * 2 + 8;
         for (int row : memory->annotatedRows()) ram->setRowHeight(row, height);
     });ram->horizontalHeader()->setStretchLastSection(true);ram->setColumnWidth(0,310);ram->setShowGrid(false);ram->setSelectionMode(QAbstractItemView::NoSelection);ml->addWidget(ram);ml->addWidget(new QLabel("Yellow outline · next instruction     Green underline · changed byte     ?? · unreadable"));
@@ -95,6 +96,23 @@ MainWindow::MainWindow(){
     auto authorship = new QLabel("Luis Pinto · @xsoulp · 2026");
     authorship->setObjectName("authorship");
     statusBar()->addPermanentWidget(authorship);
+    position->setMinimumWidth(0);
+    position->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto themeToggle = new QToolButton;
+    themeToggle->setObjectName("themeToggle");
+    themeToggle->setText("Light mode");
+    themeToggle->setAccessibleName("Light mode");
+    themeToggle->setToolTip("Toggle light mode for classroom projection or return to dark mode.");
+    themeToggle->setCheckable(true);
+    themeToggle->setChecked(lightTheme());
+    toolbar->addWidget(themeToggle);
+    connect(themeToggle, &QToolButton::toggled, this, [this](bool light) {
+        cancelMove();
+        applyTheme(*qApp, light);
+        refreshAppearance();
+        syncActions();
+    });
+    refreshAppearance();
     statusBar()->showMessage("Ready · Build F7 → Start F5 → Step F10");syncActions();
 }
 void MainWindow::syncActions(){buildAction->setEnabled(!active&&!building);startAction->setEnabled(!active&&!building&&!executable.isEmpty()&&builtSource==editor->toPlainText());stepAction->setEnabled(active&&engine.paused()&&!moveBusy);stopAction->setEnabled(active);}
@@ -114,7 +132,7 @@ void MainWindow::build(){
     });
     builder.setWorkingDirectory(QFileInfo(sourcePath).absolutePath());builder.start("nasm",{"-f","elf64","-g","-F","dwarf",sourcePath,"-o",obj});
 }
-void MainWindow::updateSnapshot(){registers->updateValues(engine.registers);editor->setExecutionLine(engine.line);position->setText(QString("RIP  0x%1   %2 (%3 bytes)").arg(engine.rip,16,16,QChar('0')).arg(engine.instruction.toHtmlEscaped()).arg(engine.instructionSize));QString s;QStringList names={"CF","ZF","SF","OF"};int bits[]={0,6,7,11};for(int i=0;i<4;++i){bool changed=haveFlags&&((oldFlags^engine.flags)&(quint64(1)<<bits[i]));s+=QString("<span style='color:%1'>%2  %3</span>　").arg(changed?"#64f0a0":"#cad9e8",names[i]).arg((engine.flags>>bits[i])&1);}s+=QString("<br>RFLAGS  0x%1").arg(engine.flags,16,16,QChar('0'));flags->setText(s);oldFlags=engine.flags;haveFlags=true;memory->refresh();stackMemory->refresh();stackTitle->setText(QString("STACK · RSP 0x%1 · 10 × 8 B").arg(engine.registers.value("rsp"),16,16,QChar('0')));animateMove();syncActions();statusBar()->showMessage("Stopped · next machine instruction ready · F10 to step");}
+void MainWindow::updateSnapshot(){registers->updateValues(engine.registers);editor->setExecutionLine(engine.line);position->setText(QString("RIP  0x%1   %2 (%3 bytes)").arg(engine.rip,16,16,QChar('0')).arg(engine.instruction.toHtmlEscaped()).arg(engine.instructionSize));changedFlags=haveFlags?(oldFlags^engine.flags):0;oldFlags=engine.flags;haveFlags=true;updateFlagDisplay();memory->refresh();stackMemory->refresh();stackTitle->setText(QString("STACK · RSP 0x%1 · 10 × 8 B").arg(engine.registers.value("rsp"),16,16,QChar('0')));animateMove();syncActions();statusBar()->showMessage("Stopped · next machine instruction ready · F10 to step");}
 void MainWindow::closeEvent(QCloseEvent *e){if(!confirmDiscard()){e->ignore();return;}cancelMove();engine.stop();builder.kill();e->accept();}
 
 void MainWindow::cancelMove() {
@@ -268,4 +286,32 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
         cancelMove();
         syncActions();
     }
+}
+
+void MainWindow::updateFlagDisplay() {
+    if (!haveFlags) {
+        flags->setText("CF —    ZF —    SF —    OF —<br>RFLAGS —");
+        return;
+    }
+    QString html;
+    const QStringList names = {"CF", "ZF", "SF", "OF"};
+    const int bits[] = {0, 6, 7, 11};
+    for (int i = 0; i < 4; ++i) {
+        const bool changed = changedFlags & (quint64(1) << bits[i]);
+        const auto color = changed ? themeColor("#64f0a0", "#006b35") : themeColor("#cad9e8", "#17212b");
+        html += QString("<span style='color:%1'>%2  %3</span>　")
+            .arg(color.name(), names[i]).arg((oldFlags >> bits[i]) & 1);
+    }
+    html += QString("<br>RFLAGS  0x%1").arg(oldFlags, 16, 16, QChar('0'));
+    flags->setText(html);
+}
+
+void MainWindow::refreshAppearance() {
+    memoryLegend->setText(QString("<span style='color:%1'>■ .text</span>　<span style='color:%2'>■ .rodata</span>　<span style='color:%3'>■ .data</span>　<span style='color:%4'>■ .bss</span>")
+        .arg(themeColor("#72aef5", "#0756a3").name(), themeColor("#c291df", "#7e268b").name(),
+             themeColor("#70cba2", "#216b39").name(), themeColor("#d8b15e", "#805500").name()));
+    updateFlagDisplay();
+    editor->refreshTheme();
+    for (auto table : {ram, stackView, registerView})
+        table->viewport()->update();
 }

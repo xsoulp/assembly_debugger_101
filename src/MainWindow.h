@@ -19,8 +19,10 @@ private:
     void stepInstruction();
     void animateMove();
     void cancelMove();
+    void refreshAppearance();
+    void updateFlagDisplay();
     std::optional<QPoint> operandPoint(const MoveOperand &operand, int line) const;
-    QLabel *flags,*position,*sourceTitle; QAction *buildAction,*startAction,*stepAction,*stopAction;
-    QString sourcePath,executable,builtSource; bool active=false,building=false; quint64 oldFlags=0;bool haveFlags=false;
+    QLabel *flags,*position,*sourceTitle,*memoryLegend; QAction *buildAction,*startAction,*stepAction,*stopAction;
+    QString sourcePath,executable,builtSource; bool active=false,building=false; quint64 oldFlags=0,changedFlags=0;bool haveFlags=false;
     bool save(); bool confirmDiscard(); void open(); void build(); void syncActions(); void showError(QString); void updateSnapshot();
 };

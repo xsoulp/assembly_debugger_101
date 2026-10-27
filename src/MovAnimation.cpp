@@ -1,4 +1,5 @@
 #include "MovAnimation.h"
+#include "Theme.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
@@ -179,11 +180,13 @@ void MoveOverlay::paintEvent(QPaintEvent *) {
     const QPointF bend = (from + to) / 2 + QPointF(0, -45);
     QPainterPath path(from);
     path.quadTo(bend, to);
-    painter.setPen(QPen(QColor(99, 210, 231, 130), 2, Qt::DashLine));
+    auto trail = themeColor("#63d2e7", "#00617a");
+    trail.setAlpha(lightTheme() ? 200 : 130);
+    painter.setPen(QPen(trail, 2, Qt::DashLine));
     painter.drawPath(path);
-    painter.setPen(QPen(QColor("#70dcec"), 2));
+    painter.setPen(QPen(themeColor("#70dcec", "#00617a"), 2));
     painter.drawEllipse(from, 9, 9);
-    painter.setPen(QPen(QColor("#f4d65e"), 2));
+    painter.setPen(QPen(themeColor("#f4d65e", "#916000"), 2));
     painter.drawEllipse(to, 11, 11);
     const qreal t = progress;
     QPointF center = (1-t)*(1-t)*from + 2*(1-t)*t*bend + t*t*to;
@@ -191,9 +194,9 @@ void MoveOverlay::paintEvent(QPaintEvent *) {
     center.setX(qBound(size.width()/2, center.x(), width()-size.width()/2));
     center.setY(qBound(size.height()/2, center.y(), height()-size.height()/2));
     const QRectF box(center - QPointF(size.width()/2, size.height()/2), size);
-    painter.setBrush(QColor("#16394a"));
-    painter.setPen(QPen(QColor("#70dcec"), 2));
+    painter.setBrush(themeColor("#16394a", "#e0f2fa"));
+    painter.setPen(QPen(themeColor("#70dcec", "#00617a"), 2));
     painter.drawRoundedRect(box, 7, 7);
-    painter.setPen(QColor("#ffffff"));
+    painter.setPen(themeColor("#ffffff", "#102d40"));
     painter.drawText(box, Qt::AlignCenter, value);
 }
