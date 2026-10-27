@@ -4,16 +4,6 @@ A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Us
 
 ![ASM101 debugging a NASM program, showing source code, registers, RAM and stack](docs/asm101-screenshot.png)
 
-## Install the Debian package (Ubuntu 24.04 amd64)
-
-Download the `.deb` from the [v1.0.3 release](https://github.com/xsoulp/assembly_debugger_101/releases/tag/v1.0.3). Open a terminal in the download folder and run:
-
-```sh
-sudo apt install ./asm101_1.0.3-1_amd64.deb
-```
-
-APT installs the declared Qt 6, NASM, binutils and GDB dependencies. Installation refreshes the application and icon caches automatically. Search for **ASM101** in the applications menu or run `asm101`. The installed example is in `/usr/share/asm101/examples/`; Save/Build prompts for an editable copy when that file is read-only.
-
 ## Build and run (Ubuntu 24.04)
 
 ```sh
@@ -41,20 +31,6 @@ Build saves the editor contents and runs `nasm -f elf64 -g -F dwarf` and `ld` as
 Plain `MOV` instructions animate the transferred hexadecimal value between visible operands for 450 ms after GDB confirms the stop. Loads travel from RAM to the exact register byte range (including AL/AH/AX/EAX); stores travel back to RAM; immediates start at the source operand in the editor. Register-to-register moves are supported for displayed register families. The value is read from the actual destination after the instruction and checked against the original source register/immediate when available. Memory addressing supports absolute addresses and 64-bit base/index/displacement or RIP-relative addresses from GDB’s Intel disassembly. Other instruction variants or unavailable/offscreen endpoints skip the animation. Step stays disabled until completion; Stop, resizing or scrolling cancels the animation without executing another instruction. Ordinary register and memory change indicators remain visible. `ADD` also animates its second operand toward the first, prefixed with `+`. Its original operands are captured before stepping (with asynchronous GDB memory reads when needed); the animation only runs after the actual destination matches the addition at the correct operand width.
 
 The status bar reports build and execution state; errors appear in native dialogs. Inferior terminal input/output is not presented in this first version. Stop terminates GDB and its inferior; there is no separate pause control. Source-level breakpoint management, editing process state, multithreaded and remote debugging are outside this version's scope.
-
-## Build the Debian package (Ubuntu 24.04)
-
-To build the package locally on Ubuntu 24.04, install the build dependencies first:
-
-```sh
-sudo apt-get update
-sudo apt-get install build-essential cmake ninja-build qt6-base-dev nasm binutils gdb
-./packaging/build-deb.sh
-```
-
-The Qt runtime libraries installed by the `.deb` do not include the development files needed to compile the application.
-
-The package and `SHA256SUMS` are written to `dist/`. GitHub Actions builds, tests and publishes these files to the v1.0.3 release. The `v1.0.3` tag identifies the source used to build the current release assets.
 
 ## About the author
 
