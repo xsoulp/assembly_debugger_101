@@ -12,12 +12,19 @@ inline QColor themeColor(const char *dark, const char *light) {
     return QColor(lightTheme() ? light : dark);
 }
 
+inline void applyTextSize(QApplication &app, bool doubled) {
+    app.setProperty("doubleText", doubled);
+    QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    font.setPointSize(doubled ? 22 : 11);
+    app.setFont(font);
+    // Refresh fonts cached by Qt's application stylesheet.
+    if (!app.styleSheet().isEmpty()) app.setStyleSheet(app.styleSheet());
+}
+
 inline void applyTheme(QApplication &app, bool light = false) {
     app.setProperty("lightTheme", light);
     app.setStyle("Fusion");
-    QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    font.setPointSize(11);
-    app.setFont(font);
+    applyTextSize(app, app.property("doubleText").toBool());
     QPalette palette;
     palette.setColor(QPalette::Window, themeColor("#0d161e", "#ffffff"));
     palette.setColor(QPalette::Base, themeColor("#0d161e", "#ffffff"));
@@ -34,6 +41,7 @@ inline void applyTheme(QApplication &app, bool light = false) {
     palette.setColor(QPalette::Disabled, QPalette::ButtonText, themeColor("#708496", "#687480"));
     app.setPalette(palette);
     const QString common = R"(
+QToolBar,QToolBar QWidget,QStatusBar,QStatusBar QWidget { font-size:11pt; }
 QToolBar { spacing:8px; padding:10px; }
 QToolButton { padding:9px 16px; border-radius:4px; }
 QToolButton#buildButton,QToolButton#stepButton { background:#0757b7; color:#ffffff; }
@@ -51,7 +59,7 @@ QMainWindow { background:#e3e9ef; }
 QToolBar { border-bottom:1px solid #a3b1c0; }
 QToolButton { background:#e8edf3; border:1px solid #8798aa; }
 QToolButton:hover { background:#cfdfef; color:#10243b; }
-QToolButton#themeToggle:checked { background:#c7ddfa; border:1px solid #0757b7; color:#10243b; }
+QToolButton#themeToggle:checked,QToolButton#zoomToggle:checked { background:#c7ddfa; border:1px solid #0757b7; color:#10243b; }
 QToolButton:disabled,QToolButton#buildButton:disabled,QToolButton#stepButton:disabled,QToolButton#startButton:disabled,QToolButton#stopButton:disabled { color:#687480; background:#e9edf1; }
 QPlainTextEdit,QTableView { border:1px solid #a3b1c0; selection-background-color:#c7ddfa; selection-color:#10243b; }
 QHeaderView::section { background:#e8edf3; color:#243c53; }
@@ -66,6 +74,7 @@ QMainWindow { background:#080f16; }
 QToolBar { border-bottom:1px solid #2b4152; }
 QToolButton { background:#233747; border:1px solid #345166; }
 QToolButton:hover { background:#164f88; }
+QToolButton#zoomToggle:checked { background:#344f6c; border:1px solid #72aef5; }
 QToolButton:disabled,QToolButton#buildButton:disabled,QToolButton#stepButton:disabled,QToolButton#startButton:disabled,QToolButton#stopButton:disabled { color:#596a78; background:#15222e; }
 QPlainTextEdit,QTableView { border:1px solid #2a4357; selection-background-color:#344f6c; }
 QHeaderView::section { background:#192a36; color:#9cbbd6; }

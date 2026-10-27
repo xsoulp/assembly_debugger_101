@@ -22,6 +22,8 @@
 #include <QScrollBar>
 #include <QCheckBox>
 #include <QHBoxLayout>
+#include <QPainter>
+#include <QTimer>
 MainWindow::MainWindow(){
     setWindowTitle("ASM101 · Visual Assembly Debugger");resize(1400,920);
     auto toolbar=addToolBar("Execution");toolbar->setMovable(false);toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -49,13 +51,13 @@ MainWindow::MainWindow(){
         registers->setSignedDecimal(enabled);
         signedToggle->setText(enabled ? "Signed" : "Unsigned");
     });
-    rl->addWidget(new QLabel("FLAGS"));flags=new QLabel("CF —    ZF —    SF —    OF —<br>RFLAGS —");flags->setTextFormat(Qt::RichText);flags->setMinimumHeight(65);rl->addWidget(flags);left->addWidget(regs);
-    auto mem=new QWidget;auto ml=new QVBoxLayout(mem);ml->setContentsMargins(0,0,0,0);ml->addWidget(new QLabel("RAM · PROCESS MEMORY"));memoryLegend=new QLabel;ml->addWidget(memoryLegend);ram=new QTableView;ram->setObjectName("ramView");memory=new MemoryModel(&engine,this);ram->setModel(memory);ram->setItemDelegate(new MemoryDelegate(ram));ram->verticalHeader()->hide();ram->verticalHeader()->setDefaultSectionSize(28);connect(memory,&QAbstractItemModel::modelReset,this,[this]{
-        const int height = ram->fontMetrics().height() * 2 + 8;
-        for (int row : memory->annotatedRows()) ram->setRowHeight(row, height);
-    });ram->horizontalHeader()->setStretchLastSection(true);ram->setColumnWidth(0,310);ram->setShowGrid(false);ram->setSelectionMode(QAbstractItemView::NoSelection);ml->addWidget(ram);ml->addWidget(new QLabel("Yellow outline · next instruction     Green underline · changed byte     ?? · unreadable"));
+    rl->addWidget(new QLabel("FLAGS"));flags=new QLabel("CF —    ZF —    SF —    OF —<br>RFLAGS —");flags->setTextFormat(Qt::RichText);flags->setWordWrap(true);flags->setMinimumHeight(65);rl->addWidget(flags);left->addWidget(regs);
+    auto mem=new QWidget;auto ml=new QVBoxLayout(mem);ml->setContentsMargins(0,0,0,0);ml->addWidget(new QLabel("RAM · PROCESS MEMORY"));memoryLegend=new QLabel;memoryLegend->setWordWrap(true);ml->addWidget(memoryLegend);ram=new QTableView;ram->setObjectName("ramView");memory=new MemoryModel(&engine,this);ram->setModel(memory);ram->setItemDelegate(new MemoryDelegate(ram));ram->verticalHeader()->hide();ram->verticalHeader()->setDefaultSectionSize(28);connect(memory,&QAbstractItemModel::modelReset,this,[this]{
+        updateTextLayout();
+    });ram->horizontalHeader()->setStretchLastSection(true);ram->setColumnWidth(0,310);ram->setShowGrid(false);ram->setSelectionMode(QAbstractItemView::NoSelection);ml->addWidget(ram);auto memoryHint = new QLabel("Yellow outline · next instruction     Green underline · changed byte     ?? · unreadable");memoryHint->setWordWrap(true);ml->addWidget(memoryHint);
     stackTitle = new QLabel("STACK · RSP — · 10 × 8 B");
     stackTitle->setObjectName("stackTitle");
+    stackTitle->setWordWrap(true);
     ml->addWidget(stackTitle);
     stackView = new QTableView;
     stackView->setObjectName("stackView");
@@ -106,6 +108,21 @@ MainWindow::MainWindow(){
     themeToggle->setCheckable(true);
     themeToggle->setChecked(lightTheme());
     toolbar->addWidget(themeToggle);
+    zoomToggle = new QToolButton;
+    zoomToggle->setObjectName("zoomToggle");
+    zoomToggle->setText("Double font size");
+    zoomToggle->setAccessibleName("Double font size");
+    zoomToggle->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    zoomToggle->setIconSize(QSize(24, 24));
+    zoomToggle->setCheckable(true);
+    zoomToggle->setChecked(qApp->property("doubleText").toBool());
+    toolbar->addWidget(zoomToggle);
+    connect(zoomToggle, &QToolButton::toggled, this, [this](bool doubled) {
+        cancelMove();
+        applyTextSize(*qApp, doubled);
+        refreshAppearance();
+        syncActions();
+    });
     connect(themeToggle, &QToolButton::toggled, this, [this](bool light) {
         cancelMove();
         applyTheme(*qApp, light);
@@ -312,6 +329,54 @@ void MainWindow::refreshAppearance() {
              themeColor("#70cba2", "#216b39").name(), themeColor("#d8b15e", "#805500").name()));
     updateFlagDisplay();
     editor->refreshTheme();
+    updateTextLayout();
+    QPixmap magnifier(48, 48);
+    magnifier.setDevicePixelRatio(2);
+    magnifier.fill(Qt::transparent);
+    QPainter painter(&magnifier);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(themeColor("#d2deeb", "#17212b"), 2, Qt::SolidLine, Qt::RoundCap));
+    painter.drawEllipse(QRectF(3, 3, 13, 13));
+    painter.drawLine(QPointF(15, 15), QPointF(22, 22));
+    painter.drawLine(QPointF(6, 9.5), QPointF(13, 9.5));
+    if (!zoomToggle->isChecked()) painter.drawLine(QPointF(9.5, 6), QPointF(9.5, 13));
+    painter.end();
+    zoomToggle->setIcon(QIcon(magnifier));
+    zoomToggle->setToolTip(zoomToggle->isChecked() ? "Restore normal font size (100%)" : "Double font size for projection (200%)");
     for (auto table : {ram, stackView, registerView})
         table->viewport()->update();
+}
+
+void MainWindow::updateTextLayout() {
+    centralWidget()->setFont(qApp->font());
+    editor->refreshFontLayout();
+    const auto registerMetrics = registerView->fontMetrics();
+    registerView->verticalHeader()->setDefaultSectionSize(qMax(27, registerMetrics.height() + 8));
+    registerView->setColumnWidth(1, registerMetrics.horizontalAdvance("0x00000000 0000 00 00") + 28);
+    registerView->setColumnWidth(2, registerMetrics.horizontalAdvance("AX:-32768  AH:-128  AL:-128") + 20);
+    registerView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    for (auto table : {ram, stackView}) {
+        const auto metrics = table->fontMetrics();
+        table->verticalHeader()->setDefaultSectionSize(qMax(28, metrics.height() + 8));
+        table->setColumnWidth(1, MemoryDelegate::byteWidth(metrics, 0) * 8 + 20);
+        table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    }
+    ram->setColumnWidth(0, qMax(310, ram->fontMetrics().horizontalAdvance("0x00000000 – 0x00000000") + 20));
+    for (int row : memory->annotatedRows())
+        ram->setRowHeight(row, ram->fontMetrics().height() * 2 + 8);
+    stackView->setColumnWidth(0, stackView->fontMetrics().horizontalAdvance("0x0000000000000000 – 0x0000000000000000") + 20);
+    const int rowHeight = stackView->verticalHeader()->defaultSectionSize();
+    const int chrome = stackView->horizontalHeader()->sizeHint().height() + 2 * stackView->frameWidth()
+                     + stackView->horizontalScrollBar()->sizeHint().height();
+    const int fullHeight = 10 * rowHeight + chrome;
+    if (qApp->property("doubleText").toBool()) {
+        stackView->setMinimumHeight(3 * rowHeight + chrome);
+        stackView->setMaximumHeight(fullHeight);
+        stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    } else {
+        stackView->setFixedHeight(fullHeight);
+        stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    }
+    ram->setMinimumHeight(3 * ram->verticalHeader()->defaultSectionSize() + ram->horizontalHeader()->sizeHint().height());
+    QTimer::singleShot(0, editor, [this] { editor->ensureCursorVisible(); });
 }

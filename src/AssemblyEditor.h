@@ -8,6 +8,7 @@ public:
     void paintGutter(QPaintEvent *event);
     int gutterWidth()const;
     void refreshTheme();
+    void refreshFontLayout();
 protected: void resizeEvent(QResizeEvent *)override;
 private: QWidget *gutter; QSyntaxHighlighter *highlighter; int executionLine=0;
 };

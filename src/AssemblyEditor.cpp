@@ -28,3 +28,11 @@ void AssemblyEditor::refreshTheme() {
     viewport()->update();
     gutter->update();
 }
+
+void AssemblyEditor::refreshFontLayout() {
+    setTabStopDistance(fontMetrics().horizontalAdvance(' ') * 4);
+    setViewportMargins(gutterWidth(), 0, 0, 0);
+    gutter->setGeometry(0, 0, gutterWidth(), height());
+    viewport()->update();
+    gutter->update();
+}

@@ -17,6 +17,8 @@ The included `examples/example.asm` opens at startup. Open another `.asm` file w
 
 Use **Light mode** in the top-right corner to switch to a white background with dark text for classroom projection. Click it again to return to dark mode. Both themes include syntax colours, execution highlights, registers, RAM and stack.
 
+The magnifying-glass button beside it doubles the content font size. Click again to restore normal size. It works in both themes; enlarged tables can be scrolled when needed.
+
 Build saves the editor contents and runs `nasm -f elf64 -g -F dwarf` and `ld` asynchronously, using a temporary directory for object/executable artifacts. It never substitutes generated source. Rebuild after changing the source. NASM includes resolve relative to the source directory. The current version supports static, non-PIE ELF64 executables with `_start`.
 
 ## What the displays mean

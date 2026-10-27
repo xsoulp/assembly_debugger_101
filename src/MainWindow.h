@@ -3,7 +3,7 @@
 #include <QTemporaryDir>
 #include "DebuggerEngine.h"
 #include "MovAnimation.h"
-class AssemblyEditor; class MemoryModel; class RegisterModel; class QLabel; class QTableView;
+class AssemblyEditor; class MemoryModel; class RegisterModel; class QLabel; class QTableView; class QToolButton;
 class MainWindow:public QMainWindow {
     Q_OBJECT
 public: MainWindow();
@@ -20,9 +20,11 @@ private:
     void animateMove();
     void cancelMove();
     void refreshAppearance();
+    void updateTextLayout();
     void updateFlagDisplay();
     std::optional<QPoint> operandPoint(const MoveOperand &operand, int line) const;
     QLabel *flags,*position,*sourceTitle,*memoryLegend; QAction *buildAction,*startAction,*stepAction,*stopAction;
+    QToolButton *zoomToggle;
     QString sourcePath,executable,builtSource; bool active=false,building=false; quint64 oldFlags=0,changedFlags=0;bool haveFlags=false;
     bool save(); bool confirmDiscard(); void open(); void build(); void syncActions(); void showError(QString); void updateSnapshot();
 };
