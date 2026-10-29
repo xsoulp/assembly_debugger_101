@@ -10,6 +10,20 @@ A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Us
 
 ![ASM101 in light mode showing the same debugging session with a white background](docs/asm101-screenshot-light.png)
 
+## Install and launch (Ubuntu 24.04 amd64)
+
+Download the `.deb` package from the **Assets** section of the [latest release](https://github.com/xsoulp/assembly_debugger_101/releases/latest). Open a terminal in the folder containing the downloaded package and install it:
+
+```sh
+sudo apt install ./asm101_*_amd64.deb
+```
+
+APT installs the required dependencies. Launch **ASM101** from the applications menu, or run:
+
+```sh
+asm101
+```
+
 ## Build and run (Ubuntu 24.04)
 
 ```sh
