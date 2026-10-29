@@ -2,7 +2,13 @@
 
 A native C++20 / Qt 6 Widgets visual debugger for NASM x86-64 Linux programs. Uses NASM, GNU ld and a real asynchronous GDB/MI2 session.
 
-![ASM101 debugging a NASM program, showing source code, registers, RAM and stack](docs/asm101-screenshot.png)
+**Dark mode**
+
+![ASM101 in dark mode debugging a NASM program, showing source code, registers, RAM and stack](docs/asm101-screenshot.png)
+
+**Light mode (white background)**
+
+![ASM101 in light mode showing the same debugging session with a white background](docs/asm101-screenshot-light.png)
 
 ## Build and run (Ubuntu 24.04)
 
