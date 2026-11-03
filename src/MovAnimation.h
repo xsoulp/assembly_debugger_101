@@ -26,21 +26,24 @@ struct MoveTransfer {
 };
 
 std::optional<MoveTransfer> decodeMov(const QString &instruction,
-                                    const QMap<QString, quint64> &registers,
-                                    quint64 rip, int instructionSize, int line);
+                                      const QMap<QString, quint64> &registers, quint64 rip,
+                                      int instructionSize, int line);
 std::optional<MoveTransfer> decodeAdd(const QString &instruction,
-                                    const QMap<QString, quint64> &registers,
-                                    quint64 rip, int instructionSize, int line);
+                                      const QMap<QString, quint64> &registers, quint64 rip,
+                                      int instructionSize, int line);
 quint64 moveMask(int bits);
 quint64 moveRegisterValue(const MoveOperand &operand, const QMap<QString, quint64> &registers);
 
 class MoveOverlay : public QWidget {
 public:
     explicit MoveOverlay(QWidget *parent);
-    void start(const QString &value, QPoint source, QPoint destination, std::function<void()> finished, const QString &operation = "MOV");
+    void start(const QString &value, QPoint source, QPoint destination,
+               std::function<void()> finished, const QString &operation = "MOV");
     void cancel();
+
 protected:
     void paintEvent(QPaintEvent *) override;
+
 private:
     QVariantAnimation animation;
     QPoint source, destination;

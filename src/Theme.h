@@ -18,7 +18,8 @@ inline void applyTextSize(QApplication &app, bool doubled) {
     font.setPointSize(doubled ? 22 : 11);
     app.setFont(font);
     // Refresh fonts cached by Qt's application stylesheet.
-    if (!app.styleSheet().isEmpty()) app.setStyleSheet(app.styleSheet());
+    if (!app.styleSheet().isEmpty())
+        app.setStyleSheet(app.styleSheet());
 }
 
 inline void applyTheme(QApplication &app, bool light = false) {
@@ -68,7 +69,8 @@ QStatusBar { color:#344a60; border-top:1px solid #a3b1c0; }
 QScrollBar:vertical { background:#edf1f5; }
 QScrollBar::handle:vertical { background:#91a1b1; }
 QToolTip { background:#ffffff; color:#17212b; border:1px solid #8798aa; }
-)") : QString(R"(
+)")
+                                      : QString(R"(
 QWidget { background:#0d161e; color:#d2deeb; }
 QMainWindow { background:#080f16; }
 QToolBar { border-bottom:1px solid #2b4152; }
