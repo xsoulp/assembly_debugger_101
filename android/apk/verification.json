@@ -1,0 +1,33 @@
+{
+  "version": "0.1.0",
+  "abi": "arm64-v8a",
+  "minSdk": 28,
+  "targetSdk": 36,
+  "build": {
+    "assembleDebug": "passed",
+    "assembleDebugAndroidTest": "passed",
+    "lintDebug": "passed",
+    "lintErrors": 0,
+    "lintWarnings": 8,
+    "assembleRelease": "passed",
+    "lintRelease": "passed",
+    "releaseLintErrors": 0,
+    "releaseLintWarnings": 8
+  },
+  "assembler": {
+    "tests": 7,
+    "status": "passed",
+    "reference": "LLVM AArch64 assembler and linker"
+  },
+  "apkSignature": "verified",
+  "apk16KiBAlignment": "verified",
+  "physicalAndroidExecution": {
+    "status": "pending",
+    "reason": "No reachable ADB device; hardware instrumentation tests are included."
+  },
+  "releaseApk": {
+    "file": "asm101-0.1.0-release.apk",
+    "signed": true,
+    "debuggable": false
+  }
+}

@@ -1,0 +1,11 @@
+/.gradle/
+/.gradle-user/
+/.cxx/
+/local.properties
+/app/build/
+/app/.cxx/
+/app/src/main/jniLibs/
+/build/
+/out/
+*.jks
+/.signing/
