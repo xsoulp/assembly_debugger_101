@@ -1,0 +1,37 @@
+name: Publish Android release
+
+on:
+  push:
+    tags:
+      - 'android-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify committed release APK
+        working-directory: android/apk
+        run: sha256sum --check SHA256SUMS
+      - name: Publish signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#android-v}"
+          apk="android/apk/asm101-$version-release.apk"
+          test -f "$apk"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "$apk" android/apk/SHA256SUMS \
+              android/apk/verification.json --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$apk" android/apk/SHA256SUMS \
+              android/apk/verification.json \
+              --verify-tag --prerelease --latest=false \
+              --title "ASM101 Android $version" --notes-file android/RELEASE_NOTES.md
+          fi
