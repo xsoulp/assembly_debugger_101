@@ -38,7 +38,9 @@ private:
     void animateMove();
     void cancelMove();
     void refreshAppearance();
+    void updateMemoryLegend();
     void updateTextLayout();
+    void updateStackLayout();
     void updateFlagDisplay();
     std::optional<QPoint> operandPoint(const MoveOperand &operand, int line) const;
     QLabel *flags, *position, *sourceTitle, *memoryLegend;
@@ -46,6 +48,7 @@ private:
     QToolButton *zoomToggle;
     QString sourcePath, executable, builtSource;
     bool active = false, building = false;
+    bool stackVisible = true;
     quint64 oldFlags = 0, changedFlags = 0;
     bool haveFlags = false;
     bool save();

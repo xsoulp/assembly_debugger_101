@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        update-desktop-database /usr/share/applications
+        gtk-update-icon-cache -f /usr/share/icons/hicolor
+        ;;
+esac
+
+exit 0

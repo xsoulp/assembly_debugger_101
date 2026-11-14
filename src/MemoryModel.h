@@ -15,6 +15,8 @@ public:
     QVariant data(const QModelIndex &, int role = Qt::DisplayRole) const override;
     QVariant headerData(int, Qt::Orientation, int) const override;
     void resetSections();
+    bool sectionVisible(const QString &name) const;
+    void setSectionVisible(const QString &name, bool visible);
     void refresh();
     quint64 address(int row) const;
     int rowForAddress(quint64 address) const;
@@ -22,6 +24,7 @@ public:
     bool validAddress(quint64) const;
     int byte(quint64) const;
     QStringList symbolsAt(quint64 address) const;
+    QStringList pointerLabels(quint64 address) const;
     QList<int> annotatedRows() const;
     bool hasSymbols(int row) const;
     QString symbolTooltip(quint64 address) const;
@@ -48,12 +51,16 @@ private:
     mutable QMap<quint64, QByteArray> cache;
     mutable QSet<quint64> requested;
     QSet<quint64> modified;
+    QSet<QString> hiddenSections;
+    void rebuildSpans();
     void fetch(quint64 page, bool compare = false);
 };
 class MemoryDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
     static int byteWidth(const QFontMetrics &metrics, int columnWidth);
+    static QFont pointerLabelFont(const QFont &font);
+    static int pointerLabelHeight(const MemoryModel *model, int row, const QFont &font);
     void paint(QPainter *, const QStyleOptionViewItem &, const QModelIndex &) const override;
     bool helpEvent(QHelpEvent *, QAbstractItemView *, const QStyleOptionViewItem &,
                    const QModelIndex &) override;

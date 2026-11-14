@@ -1,0 +1,5 @@
+- Highlight the stack address range containing RSP in gold and underline the range containing RBP.
+- Show small `stack` and `base` labels below the exact bytes pointed to by RSP and RBP, including when both point to the same byte.
+- Give stack memory a distinct coral color in both themes.
+- Click `.text`, `.rodata`, `.data`, `.bss`, or `stack` in the legend to hide or show that section. Visibility choices survive steps, restarts, and theme changes.
+- Animate `POP` from the original stack byte to the destination register, with the transferred value checked after execution.

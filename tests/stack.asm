@@ -2,9 +2,12 @@ section .text
 global _start
 _start:
     mov r12, rsp
+    mov rbp, rsp
     mov rax, 0x1122334455667788
     push rax
     mov byte [rsp], 0xaa
+    mov rcx, [rsp]
+    mov dx, [rbp-8]
     pop rbx
     mov rsp, 1
     mov rsp, r12

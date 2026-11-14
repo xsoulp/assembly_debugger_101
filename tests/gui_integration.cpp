@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QHeaderView>
+#include <QLabel>
 #include <functional>
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
@@ -47,6 +48,30 @@ int main(int argc, char **argv) {
             std::exit(1);
         }
     };
+    // Sections can share a row: hiding one must also hide its bytes and symbols.
+    {
+        DebuggerEngine engine;
+        engine.sections = {{".data", 0x1000, 3},
+                           {".bss", 0x1003, 5},
+                           {".text", 0x2000, 8},
+                           {".rodata", 0x3000, 8}};
+        engine.dataSymbols = {{0x1000, {"value"}}, {0x1003, {"buffer"}}};
+        MemoryModel model(&engine);
+        model.resetSections();
+        const int allRows = model.rowCount();
+        model.setSectionVisible(".data", false);
+        require(!model.validAddress(0x1000) && model.validAddress(0x1003) &&
+                    model.symbolsAt(0x1000).isEmpty() && !model.symbolsAt(0x1003).isEmpty(),
+                "Shared row retained a hidden section's bytes or labels");
+        for (const auto &section : engine.sections)
+            model.setSectionVisible(section.name, false);
+        require(model.rowCount() == 0 && model.annotatedRows().isEmpty(),
+                "Hiding all sections left memory rows or labels");
+        for (const auto &section : engine.sections)
+            model.setSectionVisible(section.name, true);
+        require(model.rowCount() == allRows && model.rowForAddress(0x1003) == 0,
+                "Showing sections did not restore the original layout");
+    }
     AssemblyEditor *editor = nullptr;
     for (auto e : w.findChildren<QPlainTextEdit *>())
         if (auto a = dynamic_cast<AssemblyEditor *>(e))
@@ -134,6 +159,36 @@ int main(int argc, char **argv) {
     require(memory->changed(data) && !memory->changed(data + 1), "Wrong byte highlights");
     require(!regs->changed.contains("rax"), "Register highlight persisted past next step");
     require(memory->current(regs->values["rip"]), "Missing instruction outline");
+    auto legend = w.findChild<QLabel *>("memoryLegend");
+    auto stackView = w.findChild<QTableView *>("stackView");
+    auto stackTitle = w.findChild<QLabel *>("stackTitle");
+    require(legend && legend->text().contains("href='stack'") && stackView && stackTitle,
+            "Missing clickable stack legend");
+    const QPoint firstEntry(20, legend->height() / 2);
+    QTest::mouseClick(legend, Qt::LeftButton, Qt::NoModifier, firstEntry);
+    require(!memory->sectionVisible(".text"), "Clicking the legend did not hide .text");
+    QTest::mouseClick(legend, Qt::LeftButton, Qt::NoModifier, firstEntry);
+    require(memory->sectionVisible(".text"), "Clicking the legend again did not show .text");
+    auto toggleSection = [&](const QString &section) {
+        require(QMetaObject::invokeMethod(legend, "linkActivated", Q_ARG(QString, section)),
+                "Legend activation failed");
+    };
+    const auto registersBeforeFiltering = regs->values;
+    const int allRows = memory->rowCount();
+    for (const auto &section : {".text", ".rodata", ".data", ".bss"})
+        toggleSection(section);
+    require(memory->rowCount() == 0 && legend->text().contains("line-through"),
+            "Legend did not hide sections or indicate hidden entries");
+    for (const auto &section : {".text", ".rodata", ".data", ".bss"})
+        toggleSection(section);
+    require(memory->rowCount() == allRows && memory->byte(data) == 15 && memory->changed(data) &&
+                regs->values == registersBeforeFiltering,
+            "Section filters lost cached bytes, highlights, or debugger state");
+    toggleSection("stack");
+    require(stackView->isHidden() && stackTitle->isHidden(), "Stack legend did not hide the panel");
+    toggleSection("stack");
+    require(!stackView->isHidden() && !stackTitle->isHidden(),
+            "Stack legend did not restore the panel");
     w.grab().save("/tmp/asm101-test.png");
     const auto actualRegisters = regs->values;
     const auto darkSection = memory->sectionColor(data);
@@ -192,11 +247,21 @@ int main(int argc, char **argv) {
                 }),
                 "Step to exit failed");
     }
+    toggleSection(".data");
+    toggleSection("stack");
     action("Start")->trigger();
     require(wait([&] {
                 return action("Step")->isEnabled();
             }),
             "Restart failed");
+    require(!memory->sectionVisible(".data") && stackView->isHidden(),
+            "Restart reset section visibility");
+    themeToggle->click();
+    require(!memory->sectionVisible(".data") && stackView->isHidden(),
+            "Theme change reset section visibility");
+    themeToggle->click();
+    toggleSection(".data");
+    toggleSection("stack");
     require(wait([&] {
                 return memory->byte(data) == 10;
             }),

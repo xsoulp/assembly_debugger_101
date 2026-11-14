@@ -16,19 +16,22 @@ struct MoveOperand {
 };
 
 struct MoveTransfer {
+    enum Operation { Mov, Add, Pop } operation = Mov;
     MoveOperand source, destination;
     quint64 rip = 0;
     int instructionSize = 0;
     int sourceLine = 0;
     std::optional<quint64> sourceValue;
     std::optional<quint64> destinationValue;
-    bool addition = false;
 };
 
 std::optional<MoveTransfer> decodeMov(const QString &instruction,
                                       const QMap<QString, quint64> &registers, quint64 rip,
                                       int instructionSize, int line);
 std::optional<MoveTransfer> decodeAdd(const QString &instruction,
+                                      const QMap<QString, quint64> &registers, quint64 rip,
+                                      int instructionSize, int line);
+std::optional<MoveTransfer> decodePop(const QString &instruction,
                                       const QMap<QString, quint64> &registers, quint64 rip,
                                       int instructionSize, int line);
 quint64 moveMask(int bits);

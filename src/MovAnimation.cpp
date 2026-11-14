@@ -124,12 +124,17 @@ static std::optional<MoveTransfer> decodeBinary(const QString &instruction,
         source->bits = destination->bits;
     if (source->bits != destination->bits)
         return {};
-    MoveTransfer transfer{*source, *destination, rip, size, line, {}};
+    MoveTransfer transfer{addition ? MoveTransfer::Add : MoveTransfer::Mov,
+                          *source,
+                          *destination,
+                          rip,
+                          size,
+                          line,
+                          {}};
     if (source->kind == MoveOperand::Register)
         transfer.sourceValue = moveRegisterValue(*source, registers);
     else if (source->kind == MoveOperand::Immediate)
         transfer.sourceValue = source->immediate & moveMask(destination->bits);
-    transfer.addition = addition;
     if (addition && destination->kind == MoveOperand::Register)
         transfer.destinationValue = moveRegisterValue(*destination, registers);
     return transfer;
@@ -145,6 +150,23 @@ std::optional<MoveTransfer> decodeAdd(const QString &instruction,
                                       const QMap<QString, quint64> &registers, quint64 rip,
                                       int size, int line) {
     return decodeBinary(instruction, registers, rip, size, line, true);
+}
+
+std::optional<MoveTransfer> decodePop(const QString &instruction,
+                                      const QMap<QString, quint64> &registers, quint64 rip,
+                                      int size, int line) {
+    const QString text = instruction.toLower().section('#', 0, 0).trimmed();
+    const auto match = QRegularExpression("^pop\\s+([a-z0-9]+)$").match(text);
+    if (!match.hasMatch() || size <= 0 || !registers.contains("rsp"))
+        return {};
+    const auto destination = registerOperand(match.captured(1));
+    if (!destination || !registers.contains(destination->reg) ||
+        (destination->bits != 16 && destination->bits != 64))
+        return {};
+    MoveOperand source{MoveOperand::Memory};
+    source.bits = destination->bits;
+    source.address = registers.value("rsp");
+    return MoveTransfer{MoveTransfer::Pop, source, *destination, rip, size, line, {}};
 }
 
 MoveOverlay::MoveOverlay(QWidget *parent) : QWidget(parent) {

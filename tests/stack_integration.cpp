@@ -12,6 +12,7 @@
 #include <QTableView>
 #include <QTest>
 #include <QTimer>
+#include <QToolButton>
 #include <functional>
 
 int main(int argc, char **argv) {
@@ -73,6 +74,17 @@ int main(int argc, char **argv) {
                model->byte(model->address(9) + 7) >= 0;
     };
     require(wait(loaded), "Stack bytes did not load");
+    require(model->data(model->index(9, 0), Qt::ForegroundRole).value<QColor>() ==
+                QColor("#ead55e"),
+            "RSP address is not gold");
+    require(model->sectionColor(initialRsp) == QColor("#482b29"), "Missing stack color");
+    auto themeToggle = window.findChild<QToolButton *>("themeToggle");
+    themeToggle->click();
+    require(model->data(model->index(9, 0), Qt::ForegroundRole).value<QColor>() ==
+                    QColor("#916000") &&
+                model->sectionColor(initialRsp) == QColor("#fbe3dd"),
+            "Stack colors do not adapt to the light theme");
+    themeToggle->click();
     for (int row = 0; row < 10; ++row) {
         require(model->address(row) == initialRsp - (9 - row) * 8, "Incorrect stack row address");
         require(model->rowForAddress(model->address(row)) == row &&
@@ -84,8 +96,40 @@ int main(int argc, char **argv) {
     require(view->visualRect(model->index(9, 1)).bottom() < view->viewport()->height(),
             "Tenth stack row is clipped");
     const auto originalBottom = model->data(model->index(9, 1)).toString();
-    for (int step = 1; step <= 9; ++step) {
+    auto overlay = window.findChild<QWidget *>("movOverlay");
+    require(overlay, "Missing operand animation overlay");
+    for (int step = 1; step <= 12; ++step) {
         action("Step")->trigger();
+        if (step >= 6 && step <= 8) {
+            require(wait([&] {
+                        return overlay->isVisible();
+                    }),
+                    qPrintable(
+                        QString("Stack-to-register animation did not start at step %1").arg(step)));
+            require(!action("Step")->isEnabled(), "Step enabled during stack animation");
+            require(overlay->property("value").toString() ==
+                        (step == 7 ? "0x77AA" : "0x11223344556677AA"),
+                    "Stack animation displayed an incorrect value");
+            require(overlay->property("operation").toString() == (step == 8 ? "POP" : "MOV"),
+                    "Incorrect stack animation operation");
+            const QPoint from =
+                view->viewport()->mapFrom(&window, overlay->property("source").toPoint());
+            const QRect source = view->visualRect(model->index(8, 1));
+            require(source.contains(from) &&
+                        from.x() <
+                            source.x() + 10 +
+                                MemoryDelegate::byteWidth(view->fontMetrics(), source.width()),
+                    "Animation did not start at the original stack byte");
+            require(overlay->property("source").toPoint().x() >
+                        overlay->property("destination").toPoint().x(),
+                    "Stack-to-register animation moved in the wrong direction");
+            if (step == 8) {
+                require(registers->values["rsp"] == initialRsp,
+                        "POP animation started before RSP was updated");
+                QTest::qWait(150);
+                window.grab().save("/tmp/asm101-stack-pop.png");
+            }
+        }
         require(wait([&] {
                     return action("Step")->isEnabled();
                 }),
@@ -94,22 +138,38 @@ int main(int argc, char **argv) {
         for (int row = 0; row < 10; ++row)
             require(model->address(row) == initialRsp - (9 - row) * 8,
                     "Stack addresses moved during execution");
-        if (step == 6) {
+        if (step == 2) {
+            require(model->data(model->index(9, 0), Qt::FontRole).value<QFont>().underline() &&
+                        model->data(model->index(9, 0), Qt::ForegroundRole).value<QColor>() ==
+                            QColor("#ead55e"),
+                    "RSP and RBP styles did not combine on the same address");
+            require(model->data(model->index(9, 0), Qt::ToolTipRole).toString().contains("RBP"),
+                    "Missing pointer tooltip");
+        }
+        if (step == 9) {
             require(registers->values["rsp"] == 1, "RSP was not changed to the test value");
             require(model->byte(1) == -1, "Out-of-range stack byte was fabricated");
+            for (int row = 0; row < 10; ++row)
+                require(!model->data(model->index(row, 0), Qt::ForegroundRole).isValid(),
+                        "Out-of-range RSP highlighted an unrelated address");
         }
-        if (step == 3) {
+        if (step == 4) {
             require(registers->values["rsp"] == initialRsp - 8, "PUSH did not decrement RSP");
             require(model->data(model->index(8, 1)).toString() == "88 77 66 55 44 33 22 11",
                     "Wrong PUSH bytes");
+            require(model->data(model->index(8, 0), Qt::ForegroundRole).value<QColor>() ==
+                            QColor("#ead55e") &&
+                        !model->data(model->index(9, 0), Qt::ForegroundRole).isValid() &&
+                        model->data(model->index(9, 0), Qt::FontRole).value<QFont>().underline(),
+                    "Pointer styles did not follow RSP and RBP independently");
         }
-        if (step == 4) {
+        if (step == 5) {
             require(model->byte(initialRsp - 8) == 0xaa && model->changed(initialRsp - 8) &&
                         !model->changed(initialRsp - 7),
                     "Wrong stack write or changed-byte highlight");
             window.grab().save("/tmp/asm101-stack.png");
         }
-        if (step == 5) {
+        if (step == 8) {
             require(registers->values["rsp"] == initialRsp &&
                         registers->values["rbx"] == 0x11223344556677aaULL,
                     "POP did not restore RSP and read actual bytes");
@@ -138,6 +198,6 @@ int main(int argc, char **argv) {
             }),
             "Stop failed");
     qInfo() << "PASS: ten visible stack rows, initial RSP at bottom, fixed addresses, PUSH/POP, "
-               "writes, restart";
+               "stack-to-register MOV/POP animations, writes, restart";
     return 0;
 }

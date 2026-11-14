@@ -132,6 +132,10 @@ MainWindow::MainWindow() {
     ml->setContentsMargins(0, 0, 0, 0);
     ml->addWidget(new QLabel("RAM · PROCESS MEMORY"));
     memoryLegend = new QLabel;
+    memoryLegend->setObjectName("memoryLegend");
+    memoryLegend->setTextFormat(Qt::RichText);
+    memoryLegend->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    memoryLegend->setToolTip("Click a section to show or hide it.");
     memoryLegend->setWordWrap(true);
     ml->addWidget(memoryLegend);
     ram = new QTableView;
@@ -156,6 +160,7 @@ MainWindow::MainWindow() {
     stackTitle = new QLabel("STACK · RSP — · 10 × 8 B");
     stackTitle->setObjectName("stackTitle");
     stackTitle->setWordWrap(true);
+    stackTitle->setToolTip("Gold address · RSP     Underlined address · RBP");
     ml->addWidget(stackTitle);
     stackView = new QTableView;
     stackView->setObjectName("stackView");
@@ -175,6 +180,24 @@ MainWindow::MainWindow() {
     stackView->setFixedHeight(10 * 28 + stackView->horizontalHeader()->sizeHint().height() +
                               2 * stackView->frameWidth());
     ml->addWidget(stackView);
+    connect(stackMemory, &QAbstractItemModel::dataChanged, this, [this] {
+        updateStackLayout();
+    });
+    connect(stackMemory, &QAbstractItemModel::modelReset, this, [this] {
+        updateStackLayout();
+    });
+    connect(memoryLegend, &QLabel::linkActivated, this, [this](const QString &section) {
+        cancelMove();
+        if (section == "stack") {
+            stackVisible = !stackVisible;
+            stackTitle->setVisible(stackVisible);
+            stackView->setVisible(stackVisible);
+        } else {
+            memory->setSectionVisible(section, !memory->sectionVisible(section));
+        }
+        updateMemoryLegend();
+        syncActions();
+    });
     horizontal->addWidget(mem);
     horizontal->setSizes({640, 760});
     left->setSizes({470, 390});
@@ -222,12 +245,16 @@ MainWindow::MainWindow() {
     connect(editor, &QPlainTextEdit::textChanged, this, [this] {
         syncActions();
     });
-    QFile f(EXAMPLE_PATH);
+    const QString installedExample = QDir(QCoreApplication::applicationDirPath())
+                                         .filePath("../share/asm101/examples/example.asm");
+    const QString examplePath =
+        QFileInfo::exists(installedExample) ? installedExample : QString(EXAMPLE_PATH);
+    QFile f(examplePath);
     if (f.open(QIODevice::ReadOnly)) {
         editor->setPlainText(QString::fromUtf8(f.readAll()));
-        sourcePath = QFileInfo(EXAMPLE_PATH).isWritable() ? QString(EXAMPLE_PATH) : QString();
+        sourcePath = QFileInfo(examplePath).isWritable() ? examplePath : QString();
         editor->document()->setModified(false);
-        sourceTitle->setText("SOURCE CODE · " + QFileInfo(EXAMPLE_PATH).fileName());
+        sourceTitle->setText("SOURCE CODE · " + QFileInfo(examplePath).fileName());
     }
     auto authorship = new QLabel("Luis Pinto · @xsoulp · 2026");
     authorship->setObjectName("authorship");
@@ -417,10 +444,13 @@ void MainWindow::stepInstruction() {
     if (!pendingMove)
         pendingMove = decodeAdd(engine.instruction, engine.registers, engine.rip,
                                 engine.instructionSize, engine.line);
+    if (!pendingMove)
+        pendingMove = decodePop(engine.instruction, engine.registers, engine.rip,
+                                engine.instructionSize, engine.line);
     moveBusy = pendingMove.has_value();
     syncActions();
-    // ADD needs both original operands, including any memory operand, before execution.
-    if (pendingMove && pendingMove->addition &&
+    // Capture ADD operands and the original stack value before POP changes RSP.
+    if (pendingMove && pendingMove->operation != MoveTransfer::Mov &&
         (pendingMove->source.kind == MoveOperand::Memory ||
          pendingMove->destination.kind == MoveOperand::Memory)) {
         const bool sourceMemory = pendingMove->source.kind == MoveOperand::Memory;
@@ -477,14 +507,15 @@ std::optional<QPoint> MainWindow::operandPoint(const MoveOperand &operand, int l
             view = stackView;
         }
         const int row = model->rowForAddress(operand.address);
-        if (row < 0 || !model->validAddress(operand.address))
+        if (row < 0 || !view->isVisible() || !model->validAddress(operand.address))
             return {};
         const QRect rect = view->visualRect(model->index(row, 1));
         const int width = MemoryDelegate::byteWidth(view->fontMetrics(), rect.width());
         const int offset = int(operand.address - model->address(row));
         const int label = model->hasSymbols(row) ? view->fontMetrics().height() + 2 : 0;
+        const int footer = MemoryDelegate::pointerLabelHeight(model, row, view->font());
         const QPoint point(rect.x() + 10 + offset * width + width / 2,
-                           rect.y() + label + (rect.height() - label) / 2);
+                           rect.y() + label + (rect.height() - label - footer) / 2);
         if (!view->viewport()->rect().contains(point))
             return {};
         return view->viewport()->mapTo(const_cast<MainWindow *>(this), point);
@@ -528,14 +559,15 @@ void MainWindow::animateMove() {
         if (epoch != moveEpoch)
             return;
         std::optional<quint64> expected = move.sourceValue;
-        if (move.addition) {
+        const bool addition = move.operation == MoveTransfer::Add;
+        if (addition) {
             if (!move.sourceValue || !move.destinationValue)
                 expected.reset();
             else
                 expected =
                     (*move.destinationValue + *move.sourceValue) & moveMask(move.destination.bits);
         }
-        if (!actual || (move.addition && !expected) || (expected && *expected != *actual)) {
+        if (!actual || (addition && !expected) || (expected && *expected != *actual)) {
             moveBusy = false;
             syncActions();
             return;
@@ -547,8 +579,8 @@ void MainWindow::animateMove() {
             syncActions();
             return;
         }
-        const quint64 flyingValue = move.addition ? *move.sourceValue : *actual;
-        const QString value = (move.addition ? "+ " : "") +
+        const quint64 flyingValue = addition ? *move.sourceValue : *actual;
+        const QString value = (addition ? "+ " : "") +
                               QString("0x%1")
                                   .arg(flyingValue, move.destination.bits / 4, 16, QChar('0'))
                                   .toUpper()
@@ -561,7 +593,9 @@ void MainWindow::animateMove() {
                 moveBusy = false;
                 syncActions();
             },
-            move.addition ? "ADD" : "MOV");
+            addition                              ? "ADD"
+            : move.operation == MoveTransfer::Pop ? "POP"
+                                                  : "MOV");
     };
     if (move.destination.kind == MoveOperand::Register) {
         if (!engine.registers.contains(move.destination.reg))
@@ -604,13 +638,25 @@ void MainWindow::updateFlagDisplay() {
     flags->setText(html);
 }
 
+void MainWindow::updateMemoryLegend() {
+    const QStringList sections = {".text", ".rodata", ".data", ".bss", "stack"};
+    const QColor colors[] = {themeColor("#72aef5", "#0756a3"), themeColor("#c291df", "#7e268b"),
+                             themeColor("#70cba2", "#216b39"), themeColor("#d8b15e", "#805500"),
+                             themeColor("#f29b86", "#a74329")};
+    QStringList entries;
+    for (int i = 0; i < sections.size(); ++i) {
+        const auto &section = sections[i];
+        const bool visible = section == "stack" ? stackVisible : memory->sectionVisible(section);
+        entries << QString(
+                       "<a href='%1' title='%2 %1' style='color:%3; text-decoration:%4'>%5 %1</a>")
+                       .arg(section, visible ? "Hide" : "Show", colors[i].name(),
+                            visible ? "none" : "line-through", visible ? "■" : "□");
+    }
+    memoryLegend->setText(entries.join("　"));
+}
+
 void MainWindow::refreshAppearance() {
-    memoryLegend->setText(
-        QString(
-            "<span style='color:%1'>■ .text</span>　<span style='color:%2'>■ .rodata</span>　<span "
-            "style='color:%3'>■ .data</span>　<span style='color:%4'>■ .bss</span>")
-            .arg(themeColor("#72aef5", "#0756a3").name(), themeColor("#c291df", "#7e268b").name(),
-                 themeColor("#70cba2", "#216b39").name(), themeColor("#d8b15e", "#805500").name()));
+    updateMemoryLegend();
     updateFlagDisplay();
     editor->refreshTheme();
     updateTextLayout();
@@ -656,11 +702,27 @@ void MainWindow::updateTextLayout() {
     stackView->setColumnWidth(
         0,
         stackView->fontMetrics().horizontalAdvance("0x0000000000000000 – 0x0000000000000000") + 20);
+    updateStackLayout();
+    ram->setMinimumHeight(3 * ram->verticalHeader()->defaultSectionSize() +
+                          ram->horizontalHeader()->sizeHint().height());
+    QTimer::singleShot(0, editor, [this] {
+        editor->ensureCursorVisible();
+    });
+}
+
+void MainWindow::updateStackLayout() {
     const int rowHeight = stackView->verticalHeader()->defaultSectionSize();
+    int contentHeight = 0;
+    for (int row = 0; row < stackMemory->rowCount(); ++row) {
+        const int height =
+            rowHeight + MemoryDelegate::pointerLabelHeight(stackMemory, row, stackView->font());
+        stackView->setRowHeight(row, height);
+        contentHeight += height;
+    }
     const int chrome = stackView->horizontalHeader()->sizeHint().height() +
                        2 * stackView->frameWidth() +
                        stackView->horizontalScrollBar()->sizeHint().height();
-    const int fullHeight = 10 * rowHeight + chrome;
+    const int fullHeight = contentHeight + chrome;
     if (qApp->property("doubleText").toBool()) {
         stackView->setMinimumHeight(3 * rowHeight + chrome);
         stackView->setMaximumHeight(fullHeight);
@@ -669,9 +731,4 @@ void MainWindow::updateTextLayout() {
         stackView->setFixedHeight(fullHeight);
         stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     }
-    ram->setMinimumHeight(3 * ram->verticalHeader()->defaultSectionSize() +
-                          ram->horizontalHeader()->sizeHint().height());
-    QTimer::singleShot(0, editor, [this] {
-        editor->ensureCursorVisible();
-    });
 }

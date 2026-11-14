@@ -5,6 +5,7 @@
 #include <QHelpEvent>
 #include <QToolTip>
 #include <QAbstractItemView>
+#include <QFont>
 #include <climits>
 MemoryModel::MemoryModel(DebuggerEngine *e, QObject *p, Mode mode)
     : QAbstractTableModel(p), engine(e), mode(mode) {}
@@ -31,13 +32,13 @@ bool MemoryModel::validAddress(quint64 a) const {
     if (mode == Stack)
         return haveStack && a >= stackBase && a - stackBase < 80;
     for (auto s : engine->sections)
-        if (a >= s.address && a - s.address < s.size)
+        if (sectionVisible(s.name) && a >= s.address && a - s.address < s.size)
             return true;
     return false;
 }
 QColor MemoryModel::sectionColor(quint64 a) const {
     if (mode == Stack)
-        return themeColor("#213140", "#e8edf3");
+        return themeColor("#482b29", "#fbe3dd");
     for (auto s : engine->sections)
         if (a >= s.address && a - s.address < s.size) {
             if (s.name == ".text")
@@ -65,9 +66,29 @@ void MemoryModel::resetSections() {
     cache.clear();
     requested.clear();
     modified.clear();
+    rebuildSpans();
+    endResetModel();
+}
+bool MemoryModel::sectionVisible(const QString &name) const {
+    return !hiddenSections.contains(name);
+}
+void MemoryModel::setSectionVisible(const QString &name, bool visible) {
+    if (mode != Sections || sectionVisible(name) == visible)
+        return;
+    beginResetModel();
+    if (visible)
+        hiddenSections.remove(name);
+    else
+        hiddenSections.insert(name);
+    rebuildSpans();
+    endResetModel();
+}
+void MemoryModel::rebuildSpans() {
     spans.clear();
     rows = 0;
     for (auto s : engine->sections) {
+        if (!sectionVisible(s.name))
+            continue;
         quint64 base = s.address & ~quint64(7), end = (s.address + s.size + 7) & ~quint64(7);
         if (!spans.isEmpty()) {
             auto &last = spans.last();
@@ -86,7 +107,6 @@ void MemoryModel::resetSections() {
         spans.append({base, n, rows});
         rows += int(n);
     }
-    endResetModel();
 }
 void MemoryModel::fetch(quint64 page, bool compare) {
     if (requested.contains(page) || !engine->paused())
@@ -162,7 +182,31 @@ void MemoryModel::refresh() {
         emit dataChanged(index(0, 0), index(rows - 1, 1));
 }
 QVariant MemoryModel::data(const QModelIndex &i, int role) const {
+    if (!i.isValid())
+        return {};
     quint64 a = address(i.row());
+    if (mode == Stack && haveStack && i.column() == 0) {
+        const auto contains = [this, a](const QString &name) {
+            const auto it = engine->registers.constFind(name);
+            return it != engine->registers.cend() && it.value() >= a && it.value() - a < 8;
+        };
+        if (role == Qt::ForegroundRole && contains("rsp"))
+            return themeColor("#ead55e", "#916000");
+        if (role == Qt::FontRole && contains("rbp")) {
+            QFont font;
+            font.setUnderline(true);
+            return font;
+        }
+        if (role == Qt::ToolTipRole) {
+            QStringList pointers;
+            for (const auto &name : {QString("rsp"), QString("rbp")})
+                if (contains(name))
+                    pointers << QString("%1 · 0x%2")
+                                    .arg(name.toUpper())
+                                    .arg(engine->registers.value(name), 16, 16, QChar('0'));
+            return pointers.join('\n');
+        }
+    }
     if (role == Qt::DisplayRole) {
         if (a == ~quint64(0))
             return mode == Stack ? QString("—") : QString("…");
@@ -174,6 +218,10 @@ QVariant MemoryModel::data(const QModelIndex &i, int role) const {
                 .replace("0X", "0x");
         QStringList values;
         for (int n = 0; n < 8; ++n) {
+            if (!validAddress(a + n)) {
+                values << "  ";
+                continue;
+            }
             int b = byte(a + n);
             values << (b < 0 ? QString("??") : QString("%1").arg(b, 2, 16, QChar('0')).toUpper());
         }
@@ -187,9 +235,20 @@ QVariant MemoryModel::headerData(int s, Qt::Orientation o, int role) const {
     return {};
 }
 QStringList MemoryModel::symbolsAt(quint64 a) const {
-    if (mode == Stack)
+    if (mode == Stack || !validAddress(a))
         return {};
     return engine->dataSymbols.value(a);
+}
+
+QStringList MemoryModel::pointerLabels(quint64 a) const {
+    QStringList labels;
+    if (mode != Stack || !validAddress(a))
+        return labels;
+    if (engine->registers.contains("rbp") && engine->registers.value("rbp") == a)
+        labels << "base";
+    if (engine->registers.contains("rsp") && engine->registers.value("rsp") == a)
+        labels << "stack";
+    return labels;
 }
 
 QList<int> MemoryModel::annotatedRows() const {
@@ -197,11 +256,12 @@ QList<int> MemoryModel::annotatedRows() const {
         return {};
     QSet<int> result;
     for (auto it = engine->dataSymbols.cbegin(); it != engine->dataSymbols.cend(); ++it)
-        for (const auto &span : spans)
-            if (it.key() >= span.base && (it.key() - span.base) / 8 < span.rows) {
-                result.insert(span.first + int((it.key() - span.base) / 8));
-                break;
-            }
+        if (validAddress(it.key()))
+            for (const auto &span : spans)
+                if (it.key() >= span.base && (it.key() - span.base) / 8 < span.rows) {
+                    result.insert(span.first + int((it.key() - span.base) / 8));
+                    break;
+                }
     return result.values();
 }
 
@@ -211,8 +271,11 @@ bool MemoryModel::hasSymbols(int row) const {
     const quint64 a = address(row);
     if (a == ~quint64(0))
         return false;
-    auto it = engine->dataSymbols.lowerBound(a);
-    return it != engine->dataSymbols.cend() && it.key() - a < 8;
+    for (auto it = engine->dataSymbols.lowerBound(a);
+         it != engine->dataSymbols.cend() && it.key() - a < 8; ++it)
+        if (validAddress(it.key()))
+            return true;
+    return false;
 }
 
 QString MemoryModel::symbolTooltip(quint64 a) const {
@@ -223,6 +286,23 @@ int MemoryDelegate::byteWidth(const QFontMetrics &metrics, int columnWidth) {
     // Spread the eight bytes across the available column, keeping room for labels.
     const int minimum = qMax(34, metrics.horizontalAdvance("00 ") + 4);
     return qMax(minimum, (columnWidth - 20) / 8);
+}
+
+QFont MemoryDelegate::pointerLabelFont(const QFont &font) {
+    QFont label = font;
+    label.setPointSizeF(qMax(7.0, font.pointSizeF() * 0.65));
+    label.setUnderline(false);
+    return label;
+}
+
+int MemoryDelegate::pointerLabelHeight(const MemoryModel *model, int row, const QFont &font) {
+    int lines = 0;
+    const quint64 base = model->address(row);
+    if (base == ~quint64(0))
+        return 0;
+    for (int n = 0; n < 8; ++n)
+        lines = qMax(lines, int(model->pointerLabels(base + n).size()));
+    return lines ? lines * (QFontMetrics(pointerLabelFont(font)).height() + 1) + 2 : 0;
 }
 
 void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QModelIndex &i) const {
@@ -238,16 +318,26 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
     p->setFont(o.font);
     const bool annotated = m->hasSymbols(i.row());
     const int labelHeight = annotated ? o.fontMetrics.height() + 2 : 0;
+    const int footerHeight = pointerLabelHeight(m, i.row(), o.font);
     if (i.column() == 0) {
-        p->setPen(themeColor("#99b6d6", "#344a60"));
-        p->drawText(o.rect.adjusted(10, labelHeight, 0, 0), Qt::AlignVCenter,
+        const auto foreground = m->data(i, Qt::ForegroundRole);
+        p->setPen(foreground.isValid() ? foreground.value<QColor>()
+                                       : themeColor("#99b6d6", "#344a60"));
+        if (m->data(i, Qt::FontRole).value<QFont>().underline()) {
+            QFont font = o.font;
+            font.setUnderline(true);
+            p->setFont(font);
+        }
+        p->drawText(o.rect.adjusted(10, labelHeight, 0, -footerHeight), Qt::AlignVCenter,
                     m->data(i).toString());
     } else {
         const int width = byteWidth(o.fontMetrics, o.rect.width());
         const int x = o.rect.x() + 10;
         for (int n = 0; n < 8; ++n) {
+            if (!m->validAddress(a + n))
+                continue;
             const QRect r(x + n * width, o.rect.y() + labelHeight + 1, width - 2,
-                          o.rect.height() - labelHeight - 2);
+                          o.rect.height() - labelHeight - footerHeight - 2);
             p->fillRect(r, m->sectionColor(a + n));
             if (m->current(a + n)) {
                 p->setPen(themeColor("#ead55e", "#916000"));
@@ -261,6 +351,20 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
                         b < 0 ? "??" : QString("%1").arg(b, 2, 16, QChar('0')).toUpper());
             if (m->changed(a + n))
                 p->fillRect(r.adjusted(2, r.height() - 3, -2, 0), themeColor("#64f0a0", "#006b35"));
+
+            const auto pointers = m->pointerLabels(a + n);
+            if (!pointers.isEmpty()) {
+                const QFont font = pointerLabelFont(o.font);
+                const int lineHeight = QFontMetrics(font).height() + 1;
+                p->setFont(font);
+                for (int line = 0; line < pointers.size(); ++line) {
+                    p->setPen(pointers[line] == "stack" ? themeColor("#ead55e", "#916000")
+                                                        : themeColor("#b9cce0", "#344a60"));
+                    const QRect label(r.x(), r.bottom() + 2 + line * lineHeight, r.width(),
+                                      lineHeight);
+                    p->drawText(label, Qt::AlignHCenter | Qt::AlignVCenter, pointers[line]);
+                }
+            }
 
             const auto names = m->symbolsAt(a + n);
             if (!names.isEmpty()) {

@@ -13,9 +13,54 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev nasm binutils gdb
+          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev nasm binutils gdb imagemagick
       - name: Build and test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DASM101_BUILD_PACKAGE=ON
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
+      - name: Build Debian package
+        run: |
+          cpack --config build/CPackConfig.cmake -B dist
+          cd dist
+          sha256sum asm101_*_amd64.deb > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asm101-ubuntu-24.04-amd64
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: asm101-ubuntu-24.04-amd64
+          path: dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^project(ASM101 VERSION \([^ ]*\) LANGUAGES CXX)$/\1/p' CMakeLists.txt)
+          test "$GITHUB_REF_NAME" = "v$version"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "ASM101 $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS --verify-tag --title "ASM101 $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          fi
+      - name: Update historical release descriptions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for notes in docs/releases/*.md; do
+            tag=$(basename "$notes" .md)
+            gh release edit "$tag" --notes-file "$notes"
+          done
