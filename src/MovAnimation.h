@@ -16,7 +16,7 @@ struct MoveOperand {
 };
 
 struct MoveTransfer {
-    enum Operation { Mov, Add, Pop } operation = Mov;
+    enum Operation { Mov, Add, Pop, Push } operation = Mov;
     MoveOperand source, destination;
     quint64 rip = 0;
     int instructionSize = 0;
@@ -34,6 +34,9 @@ std::optional<MoveTransfer> decodeAdd(const QString &instruction,
 std::optional<MoveTransfer> decodePop(const QString &instruction,
                                       const QMap<QString, quint64> &registers, quint64 rip,
                                       int instructionSize, int line);
+std::optional<MoveTransfer> decodePush(const QString &instruction,
+                                       const QMap<QString, quint64> &registers, quint64 rip,
+                                       int instructionSize, int line);
 quint64 moveMask(int bits);
 quint64 moveRegisterValue(const MoveOperand &operand, const QMap<QString, quint64> &registers);
 

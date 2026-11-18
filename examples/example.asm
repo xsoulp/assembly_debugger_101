@@ -1,17 +1,18 @@
 SECTION .data
-mem8: db -100
+mem8: db 210
 SECTION .text
 global _start
 _start:
-mov rax, 0x123456789ABCDEF0
-mov [rsp-8], rax
-mov [rsp-16], rax
-mov al, -20
-inc al
-mov ah, al
-add al, ah
-xor ah,ah
-adc ah,0
+mov rbp , rsp
+mov ax, 0xAABB
+mov bx, 0xCCDD
+push word 3
+push bx
+push ax
+
+;mov ax, -20
+;movzx bx, byte [mem8]
+;add ax, bx
 
 call sum
 
@@ -20,6 +21,6 @@ xor rdi, rdi
 syscall
 
 
-sum: 
+sum:
  mov al,10
  ret

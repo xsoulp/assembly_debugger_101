@@ -23,6 +23,12 @@ public:
     QColor sectionColor(quint64) const;
     bool validAddress(quint64) const;
     int byte(quint64) const;
+    QString byteText(quint64) const;
+    QString byteTooltip(quint64) const;
+    bool toggleAscii(quint64);
+    bool showsAscii(quint64 address) const {
+        return asciiBytes.contains(address);
+    }
     QStringList symbolsAt(quint64 address) const;
     QStringList pointerLabels(quint64 address) const;
     QList<int> annotatedRows() const;
@@ -46,12 +52,13 @@ private:
     Mode mode;
     quint64 stackBase = 0;
     bool haveStack = false;
-    QMap<quint64, uchar> stackBytes;
     void refreshStack();
+    void fetchStack(quint64 page, bool compare);
     mutable QMap<quint64, QByteArray> cache;
     mutable QSet<quint64> requested;
     QSet<quint64> modified;
     QSet<QString> hiddenSections;
+    QSet<quint64> asciiBytes;
     void rebuildSpans();
     void fetch(quint64 page, bool compare = false);
 };
@@ -62,6 +69,8 @@ public:
     static QFont pointerLabelFont(const QFont &font);
     static int pointerLabelHeight(const MemoryModel *model, int row, const QFont &font);
     void paint(QPainter *, const QStyleOptionViewItem &, const QModelIndex &) const override;
+    bool editorEvent(QEvent *, QAbstractItemModel *, const QStyleOptionViewItem &,
+                     const QModelIndex &) override;
     bool helpEvent(QHelpEvent *, QAbstractItemView *, const QStyleOptionViewItem &,
                    const QModelIndex &) override;
 };

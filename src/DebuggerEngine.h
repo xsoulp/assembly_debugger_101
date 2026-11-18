@@ -3,7 +3,10 @@
 #include <QProcess>
 #include <QMap>
 #include <functional>
+#include <memory>
 #include "Mi.h"
+class QSocketNotifier;
+class QTemporaryDir;
 struct Section {
     QString name;
     quint64 address = 0, size = 0;
@@ -13,7 +16,7 @@ class DebuggerEngine : public QObject {
 public:
     explicit DebuggerEngine(QObject *parent = nullptr);
     ~DebuggerEngine();
-    void start(const QString &executable);
+    void start(const QString &executable, const QStringList &arguments = {});
     void step();
     void stop();
     void readMemory(quint64 address, int count, std::function<void(QByteArray)> callback);
@@ -31,6 +34,7 @@ signals:
     void running();
     void ended();
     void error(QString message);
+    void standardOutput(const QByteArray &data);
 
 private:
     QProcess process;
@@ -39,6 +43,12 @@ private:
     bool ready = false, terminating = false;
     QMap<int, std::function<void(QString, Mi)>> pending;
     QStringList registerNames;
+    std::unique_ptr<QTemporaryDir> outputDirectory;
+    QSocketNotifier *outputNotifier = nullptr;
+    int outputFd = -1;
+    bool prepareOutput();
+    void readOutput();
+    void closeOutput();
     void command(QString command, std::function<void(QString, Mi)> callback = {},
                  bool reportError = true);
     void consume();

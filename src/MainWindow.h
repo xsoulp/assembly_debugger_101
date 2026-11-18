@@ -1,6 +1,7 @@
 #pragma once
 #include <QMainWindow>
 #include <QTemporaryDir>
+#include <QStringConverter>
 #include "DebuggerEngine.h"
 #include "MovAnimation.h"
 class AssemblyEditor;
@@ -9,6 +10,10 @@ class RegisterModel;
 class QLabel;
 class QTableView;
 class QToolButton;
+class QLineEdit;
+class QToolBar;
+class QSplitter;
+class QPlainTextEdit;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -17,6 +22,7 @@ public:
 protected:
     void closeEvent(QCloseEvent *) override;
     void resizeEvent(QResizeEvent *) override;
+    bool eventFilter(QObject *, QEvent *) override;
 
 private:
     DebuggerEngine engine;
@@ -25,8 +31,20 @@ private:
     AssemblyEditor *editor;
     MemoryModel *memory;
     MemoryModel *stackMemory;
-    QTableView *stackView;
+    QTableView *stackView = nullptr;
     QLabel *stackTitle;
+    QWidget *stackPanel;
+    QSplitter *memorySplitter;
+    QSet<int> stackPointerRows;
+    bool stackScrollPending = false;
+    std::optional<quint64> lastStackPointer;
+    int stackWheelRemainder = 0;
+    int stackPixelRemainder = 0;
+    void focusStackPointer(const QString &name);
+    QWidget *stdoutPanel;
+    QPlainTextEdit *stdoutView;
+    QStringDecoder stdoutDecoder{QStringDecoder::Utf8};
+    void appendStandardOutput(const QByteArray &data);
     RegisterModel *registers;
     QTableView *ram;
     QTableView *registerView;
@@ -46,6 +64,10 @@ private:
     QLabel *flags, *position, *sourceTitle, *memoryLegend;
     QAction *buildAction, *startAction, *stepAction, *stopAction;
     QToolButton *zoomToggle;
+    QToolBar *argumentsBar;
+    QLineEdit *argumentsEdit;
+    QWidget *startButton;
+    void showProgramArguments();
     QString sourcePath, executable, builtSource;
     bool active = false, building = false;
     bool stackVisible = true;

@@ -1,16 +1,27 @@
 #include "DebuggerEngine.h"
+#include "ProgramArguments.h"
 #include <QFile>
+#include <QProcessEnvironment>
+#include <QSocketNotifier>
+#include <QTemporaryDir>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cerrno>
 #include <elf.h>
 #include <cstring>
 DebuggerEngine::DebuggerEngine(QObject *p) : QObject(p) {
     connect(&process, &QProcess::readyReadStandardOutput, this, &DebuggerEngine::consume);
     connect(&process, &QProcess::errorOccurred, this, [this](auto) {
+        if (process.state() == QProcess::NotRunning)
+            closeOutput();
         if (!terminating)
             emit error(process.errorString());
     });
     connect(&process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this] {
         ready = false;
         pending.clear();
+        closeOutput();
         emit ended();
     });
 }
@@ -18,6 +29,63 @@ DebuggerEngine::~DebuggerEngine() {
     terminating = true;
     process.kill();
     process.waitForFinished(1000);
+    closeOutput();
+}
+bool DebuggerEngine::prepareOutput() {
+    closeOutput();
+    outputDirectory = std::make_unique<QTemporaryDir>();
+    if (!outputDirectory->isValid()) {
+        emit error("Could not create a temporary directory for program stdout.");
+        return false;
+    }
+    const auto path = QFile::encodeName(outputDirectory->filePath("stdout"));
+    if (::mkfifo(path.constData(), 0600) != 0) {
+        const auto message = QString::fromLocal8Bit(std::strerror(errno));
+        closeOutput();
+        emit error("Could not create program stdout pipe: " + message);
+        return false;
+    }
+    // Hold both ends so reads do not report EOF before the inferior has started.
+    // CLOEXEC prevents GDB/the inferior from inheriting our reader descriptor.
+    outputFd = ::open(path.constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (outputFd < 0) {
+        const auto message = QString::fromLocal8Bit(std::strerror(errno));
+        closeOutput();
+        emit error("Could not open program stdout pipe: " + message);
+        return false;
+    }
+    outputNotifier = new QSocketNotifier(outputFd, QSocketNotifier::Read, this);
+    connect(outputNotifier, &QSocketNotifier::activated, this, [this] {
+        readOutput();
+    });
+    return true;
+}
+void DebuggerEngine::readOutput() {
+    if (outputFd < 0)
+        return;
+    QByteArray data;
+    char chunk[4096];
+    // Bound each event so a noisy program cannot monopolize the GUI thread.
+    while (data.size() < 256 * 1024) {
+        const auto count = ::read(outputFd, chunk, sizeof(chunk));
+        if (count > 0)
+            data.append(chunk, count);
+        else if (count < 0 && errno == EINTR)
+            continue;
+        else
+            break;
+    }
+    if (!data.isEmpty())
+        emit standardOutput(data);
+}
+void DebuggerEngine::closeOutput() {
+    readOutput(); // Preserve bytes written immediately before exit or Stop.
+    delete outputNotifier;
+    outputNotifier = nullptr;
+    if (outputFd >= 0)
+        ::close(outputFd);
+    outputFd = -1;
+    outputDirectory.reset();
 }
 void DebuggerEngine::command(QString c, std::function<void(QString, Mi)> cb, bool reportError) {
     int t = ++token;
@@ -29,11 +97,19 @@ void DebuggerEngine::command(QString c, std::function<void(QString, Mi)> cb, boo
     };
     process.write(QString::number(t).toUtf8() + c.toUtf8() + "\n");
 }
-void DebuggerEngine::start(const QString &path) {
+void DebuggerEngine::start(const QString &path, const QStringList &arguments) {
     if (process.state() != QProcess::NotRunning) {
         emit error("Stop the current session first.");
         return;
     }
+    for (const auto &argument : arguments) {
+        if (argument.contains(QChar('\0')) || argument.contains('\n') || argument.contains('\r')) {
+            emit error("Program arguments must be a single line without NUL characters.");
+            return;
+        }
+    }
+    if (!prepareOutput())
+        return;
     loadSections(path);
     registers.clear();
     registerNames.clear();
@@ -42,11 +118,16 @@ void DebuggerEngine::start(const QString &path) {
     buffer.clear();
     connect(
         &process, &QProcess::started, this,
-        [this, path] {
+        [this, path, arguments] {
             command("-gdb-set pagination off");
             command("-gdb-set disassembly-flavor intel");
             command("-gdb-set confirm off");
             command("-gdb-set mi-async on");
+            command("-gdb-set startup-with-shell on");
+            // stdout uses a separate pipe so arbitrary program bytes can never
+            // be mistaken for GDB/MI records. Argument values remain literal.
+            command("-exec-arguments " + quoteProgramArguments(arguments) + " > " +
+                    quoteProgramArguments({outputDirectory->filePath("stdout")}));
             command("-file-exec-and-symbols " + miQuote(path), [this](QString result, Mi) {
                 if (result != "done")
                     return;
@@ -63,6 +144,10 @@ void DebuggerEngine::start(const QString &path) {
             });
         },
         Qt::SingleShotConnection);
+    // Use a predictable POSIX shell for the individually quoted literal arguments.
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("SHELL", "/bin/sh");
+    process.setProcessEnvironment(environment);
     process.start("gdb", {"--quiet", "--nx", "--interpreter=mi2"});
 }
 void DebuggerEngine::consume() {

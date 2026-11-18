@@ -4,11 +4,12 @@
 class RegisterModel : public QAbstractTableModel {
 public:
     using QAbstractTableModel::QAbstractTableModel;
-    QStringList names = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip"};
+    QStringList names = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
+                         "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15"};
     QMap<QString, quint64> values;
     QSet<QString> changed;
     int rowCount(const QModelIndex &p = {}) const override {
-        return p.isValid() ? 0 : 9;
+        return p.isValid() ? 0 : int(names.size());
     }
     int columnCount(const QModelIndex & = {}) const override {
         return 3;

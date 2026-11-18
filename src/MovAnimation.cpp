@@ -13,6 +13,14 @@ quint64 moveRegisterValue(const MoveOperand &operand, const QMap<QString, quint6
 }
 
 static std::optional<MoveOperand> registerOperand(const QString &name) {
+    const auto extended = QRegularExpression("^r(8|9|1[0-5])(d|w|b)?$").match(name);
+    if (extended.hasMatch()) {
+        MoveOperand result{MoveOperand::Register};
+        result.reg = "r" + extended.captured(1);
+        const QString suffix = extended.captured(2);
+        result.bits = suffix == "d" ? 32 : suffix == "w" ? 16 : suffix == "b" ? 8 : 64;
+        return result;
+    }
     const QList<QStringList> families = {
         {"rax", "eax", "ax", "al", "ah"}, {"rbx", "ebx", "bx", "bl", "bh"},
         {"rcx", "ecx", "cx", "cl", "ch"}, {"rdx", "edx", "dx", "dl", "dh"},
@@ -152,21 +160,54 @@ std::optional<MoveTransfer> decodeAdd(const QString &instruction,
     return decodeBinary(instruction, registers, rip, size, line, true);
 }
 
+static std::optional<MoveTransfer> decodeStack(const QString &instruction,
+                                               const QMap<QString, quint64> &registers, quint64 rip,
+                                               int size, int line, bool push) {
+    QString text = instruction.toLower().section('#', 0, 0).trimmed();
+    text.remove(QRegularExpression("<[^>]*>"));
+    const auto match = QRegularExpression(push ? "^push\\s+(.+)$" : "^pop\\s+(.+)$").match(text);
+    if (!match.hasMatch() || size <= 0 || !registers.contains("rsp"))
+        return {};
+    auto explicitOperand = operand(match.captured(1), registers, rip + size);
+    // Immediate pushes use ordinary changed-value highlights rather than an overlay.
+    if (!explicitOperand || explicitOperand->kind == MoveOperand::Immediate ||
+        (explicitOperand->bits != 16 && explicitOperand->bits != 64))
+        return {};
+    const quint64 rsp = registers.value("rsp");
+    const int bytes = explicitOperand->bits / 8;
+    MoveOperand stack{MoveOperand::Memory};
+    stack.bits = explicitOperand->bits;
+    stack.address = push ? rsp - bytes : rsp;
+    if (!push && explicitOperand->kind == MoveOperand::Memory) {
+        // POP increments RSP before calculating a memory destination based on RSP.
+        auto afterPop = registers;
+        afterPop["rsp"] += bytes;
+        explicitOperand = operand(match.captured(1), afterPop, rip + size);
+        if (!explicitOperand)
+            return {};
+    }
+    MoveTransfer transfer{push ? MoveTransfer::Push : MoveTransfer::Pop,
+                          push ? *explicitOperand : stack,
+                          push ? stack : *explicitOperand,
+                          rip,
+                          size,
+                          line,
+                          {}};
+    if (push && explicitOperand->kind == MoveOperand::Register)
+        transfer.sourceValue = moveRegisterValue(*explicitOperand, registers);
+    return transfer;
+}
+
 std::optional<MoveTransfer> decodePop(const QString &instruction,
                                       const QMap<QString, quint64> &registers, quint64 rip,
                                       int size, int line) {
-    const QString text = instruction.toLower().section('#', 0, 0).trimmed();
-    const auto match = QRegularExpression("^pop\\s+([a-z0-9]+)$").match(text);
-    if (!match.hasMatch() || size <= 0 || !registers.contains("rsp"))
-        return {};
-    const auto destination = registerOperand(match.captured(1));
-    if (!destination || !registers.contains(destination->reg) ||
-        (destination->bits != 16 && destination->bits != 64))
-        return {};
-    MoveOperand source{MoveOperand::Memory};
-    source.bits = destination->bits;
-    source.address = registers.value("rsp");
-    return MoveTransfer{MoveTransfer::Pop, source, *destination, rip, size, line, {}};
+    return decodeStack(instruction, registers, rip, size, line, false);
+}
+
+std::optional<MoveTransfer> decodePush(const QString &instruction,
+                                       const QMap<QString, quint64> &registers, quint64 rip,
+                                       int size, int line) {
+    return decodeStack(instruction, registers, rip, size, line, true);
 }
 
 MoveOverlay::MoveOverlay(QWidget *parent) : QWidget(parent) {

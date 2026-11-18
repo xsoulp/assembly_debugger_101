@@ -3,6 +3,7 @@
 #include "MemoryModel.h"
 #include "RegisterModel.h"
 #include "Theme.h"
+#include "ProgramArguments.h"
 #include <QSplitter>
 #include <QTableView>
 #include <QHeaderView>
@@ -24,6 +25,13 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QTimer>
+#include <QLineEdit>
+#include <QShortcut>
+#include <QContextMenuEvent>
+#include <QMenuBar>
+#include <QMenu>
+#include <QPlainTextEdit>
+#include <QWheelEvent>
 MainWindow::MainWindow() {
     setWindowTitle("ASM101 · Visual Assembly Debugger");
     resize(1400, 920);
@@ -50,15 +58,25 @@ MainWindow::MainWindow() {
             showError("Source changed. Build before starting.");
             return;
         }
+        const auto arguments = parseProgramArguments(argumentsEdit->text());
+        if (!arguments.error.isEmpty()) {
+            showProgramArguments();
+            statusBar()->showMessage(arguments.error);
+            return;
+        }
         cancelMove();
         active = true;
         haveFlags = false;
+        stackScrollPending = true;
+        stackWheelRemainder = stackPixelRemainder = 0;
+        stdoutView->clear();
+        stdoutDecoder = QStringDecoder(QStringDecoder::Utf8);
         registers->values.clear();
         registers->updateValues({});
-        engine.start(executable);
+        engine.start(executable, arguments.values);
         memory->resetSections();
         stackMemory->resetSections();
-        stackTitle->setText("STACK · RSP — · 10 × 8 B");
+        stackTitle->setText("STACK · RSP — · scroll to explore");
         editor->setReadOnly(true);
         syncActions();
         statusBar()->showMessage("Starting GDB…");
@@ -75,11 +93,52 @@ MainWindow::MainWindow() {
     toolbar->widgetForAction(stepAction)->setObjectName("stepButton");
     toolbar->widgetForAction(startAction)->setObjectName("startButton");
     toolbar->widgetForAction(stopAction)->setObjectName("stopButton");
+    startButton = toolbar->widgetForAction(startAction);
+    startButton->installEventFilter(this);
+    // Disabled buttons route context-menu events to the toolbar before a build.
+    toolbar->installEventFilter(this);
+    startAction->setToolTip("Start (F5) · Right-click or F11 for program arguments");
+    addToolBarBreak();
+    argumentsBar = addToolBar("Program arguments");
+    argumentsBar->setObjectName("programArgumentsBar");
+    argumentsBar->setMovable(false);
+    auto argumentsLabel = new QLabel("Arguments");
+    argumentsBar->addWidget(argumentsLabel);
+    argumentsEdit = new QLineEdit;
+    argumentsEdit->setObjectName("programArgumentsEdit");
+    argumentsEdit->setPlaceholderText("e.g. hello 42 \"two words\"");
+    argumentsEdit->setClearButtonEnabled(true);
+    argumentsEdit->setToolTip(
+        "Arguments for the next Start. Separate with spaces; use single or double quotes "
+        "to group text. Backslash escapes the next character except inside single quotes. "
+        "Values are passed literally, without shell expansion. Empty quotes pass an empty "
+        "argument.");
+    argumentsEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    argumentsBar->addWidget(argumentsEdit);
+    auto closeArguments = argumentsBar->addAction("Hide (F11)");
+    connect(closeArguments, &QAction::triggered, argumentsBar, &QToolBar::hide);
+    argumentsBar->hide();
+    auto argumentsShortcut = new QShortcut(QKeySequence(Qt::Key_F11), this);
+    connect(argumentsShortcut, &QShortcut::activated, this, [this] {
+        if (argumentsBar->isVisible())
+            argumentsBar->hide();
+        else
+            showProgramArguments();
+    });
+    connect(argumentsEdit, &QLineEdit::returnPressed, argumentsBar, &QToolBar::hide);
+    connect(argumentsEdit, &QLineEdit::textChanged, this, [this] {
+        const auto arguments = parseProgramArguments(argumentsEdit->text());
+        argumentsEdit->setAccessibleDescription(arguments.error);
+        startAction->setToolTip(
+            "Start (F5) · Right-click or F11 for program arguments\n" +
+            (argumentsEdit->text().isEmpty() ? "No program arguments" : argumentsEdit->text()));
+    });
     toolbar->addSeparator();
     position = new QLabel("RIP  —");
     toolbar->addWidget(position);
     auto horizontal = new QSplitter(Qt::Horizontal);
     auto left = new QSplitter(Qt::Vertical);
+    left->setObjectName("leftSplitter");
     horizontal->addWidget(left);
     auto source = new QWidget;
     auto sl = new QVBoxLayout(source);
@@ -127,6 +186,48 @@ MainWindow::MainWindow() {
     flags->setMinimumHeight(65);
     rl->addWidget(flags);
     left->addWidget(regs);
+    stdoutPanel = new QWidget;
+    stdoutPanel->setObjectName("stdoutPanel");
+    auto stdoutLayout = new QVBoxLayout(stdoutPanel);
+    stdoutLayout->setContentsMargins(0, 0, 0, 0);
+    auto stdoutHeader = new QHBoxLayout;
+    stdoutHeader->addWidget(new QLabel("STDOUT"));
+    stdoutHeader->addStretch();
+    auto clearOutput = new QToolButton;
+    clearOutput->setObjectName("clearStdoutButton");
+    clearOutput->setText("Clear");
+    stdoutHeader->addWidget(clearOutput);
+    auto hideOutput = new QToolButton;
+    hideOutput->setObjectName("hideStdoutButton");
+    hideOutput->setText("Hide (F9)");
+    stdoutHeader->addWidget(hideOutput);
+    stdoutLayout->addLayout(stdoutHeader);
+    stdoutView = new QPlainTextEdit;
+    stdoutView->setObjectName("stdoutView");
+    stdoutView->setReadOnly(true);
+    stdoutView->setLineWrapMode(QPlainTextEdit::NoWrap);
+    stdoutView->setMaximumBlockCount(5000);
+    stdoutView->setPlaceholderText("Program stdout appears here.");
+    stdoutView->setMinimumHeight(60);
+    stdoutView->setToolTip("Program standard output · retained after exit · cleared on Start");
+    stdoutLayout->addWidget(stdoutView);
+    left->addWidget(stdoutPanel);
+    auto stdoutToggle = new QAction("Stdout", this);
+    stdoutToggle->setObjectName("stdoutToggle");
+    stdoutToggle->setCheckable(true);
+    stdoutToggle->setChecked(true);
+    stdoutToggle->setShortcut(QKeySequence(Qt::Key_F9));
+    menuBar()->addMenu("&View")->addAction(stdoutToggle);
+    connect(stdoutToggle, &QAction::toggled, this, [this](bool visible) {
+        cancelMove();
+        syncActions();
+        stdoutPanel->setVisible(visible);
+    });
+    connect(hideOutput, &QToolButton::clicked, this, [stdoutToggle] {
+        stdoutToggle->setChecked(false);
+    });
+    connect(clearOutput, &QToolButton::clicked, stdoutView, &QPlainTextEdit::clear);
+    connect(&engine, &DebuggerEngine::standardOutput, this, &MainWindow::appendStandardOutput);
     auto mem = new QWidget;
     auto ml = new QVBoxLayout(mem);
     ml->setContentsMargins(0, 0, 0, 0);
@@ -138,6 +239,14 @@ MainWindow::MainWindow() {
     memoryLegend->setToolTip("Click a section to show or hide it.");
     memoryLegend->setWordWrap(true);
     ml->addWidget(memoryLegend);
+    memorySplitter = new QSplitter(Qt::Vertical);
+    memorySplitter->setObjectName("memorySplitter");
+    memorySplitter->setChildrenCollapsible(false);
+    ml->addWidget(memorySplitter, 1);
+    auto ramPanel = new QWidget;
+    auto ramLayout = new QVBoxLayout(ramPanel);
+    ramLayout->setContentsMargins(0, 0, 0, 0);
+    memorySplitter->addWidget(ramPanel);
     ram = new QTableView;
     ram->setObjectName("ramView");
     memory = new MemoryModel(&engine, this);
@@ -152,16 +261,28 @@ MainWindow::MainWindow() {
     ram->setColumnWidth(0, 310);
     ram->setShowGrid(false);
     ram->setSelectionMode(QAbstractItemView::NoSelection);
-    ml->addWidget(ram);
-    auto memoryHint = new QLabel(
-        "Yellow outline · next instruction     Green underline · changed byte     ?? · unreadable");
+    ramLayout->addWidget(ram, 1);
+    auto memoryHint =
+        new QLabel("Click a byte · hex ↔ ASCII     Yellow outline · next instruction\n"
+                   "Green underline · changed byte     ?? · unreadable");
     memoryHint->setWordWrap(true);
-    ml->addWidget(memoryHint);
-    stackTitle = new QLabel("STACK · RSP — · 10 × 8 B");
+    ramLayout->addWidget(memoryHint);
+    stackPanel = new QWidget;
+    auto stackLayout = new QVBoxLayout(stackPanel);
+    stackLayout->setContentsMargins(0, 0, 0, 0);
+    memorySplitter->addWidget(stackPanel);
+    memorySplitter->handle(1)->setToolTip("Drag to resize RAM and stack");
+    memorySplitter->setSizes({350, 350});
+    stackTitle = new QLabel("STACK · RSP — · scroll to explore");
     stackTitle->setObjectName("stackTitle");
     stackTitle->setWordWrap(true);
-    stackTitle->setToolTip("Gold address · RSP     Underlined address · RBP");
-    ml->addWidget(stackTitle);
+    stackTitle->setTextFormat(Qt::RichText);
+    stackTitle->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    stackTitle->setToolTip("Click stack (RSP) or base (RBP) to center that pointer.\n"
+                           "Scroll one row per wheel notch or scrollbar arrow click.\n"
+                           "Drag the divider above this panel to resize it.");
+    connect(stackTitle, &QLabel::linkActivated, this, &MainWindow::focusStackPointer);
+    stackLayout->addWidget(stackTitle);
     stackView = new QTableView;
     stackView->setObjectName("stackView");
     stackMemory = new MemoryModel(&engine, this, MemoryModel::Stack);
@@ -175,11 +296,13 @@ MainWindow::MainWindow() {
         stackView->fontMetrics().horizontalAdvance("0x0000000000000000 – 0x0000000000000000") + 20);
     stackView->setShowGrid(false);
     stackView->setSelectionMode(QAbstractItemView::NoSelection);
-    stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    stackView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    stackView->setFixedHeight(10 * 28 + stackView->horizontalHeader()->sizeHint().height() +
-                              2 * stackView->frameWidth());
-    ml->addWidget(stackView);
+    stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    stackView->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
+    stackView->verticalScrollBar()->setSingleStep(1);
+    stackView->viewport()->installEventFilter(this);
+    stackView->verticalScrollBar()->installEventFilter(this);
+    stackView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    stackLayout->addWidget(stackView, 1);
     connect(stackMemory, &QAbstractItemModel::dataChanged, this, [this] {
         updateStackLayout();
     });
@@ -192,6 +315,7 @@ MainWindow::MainWindow() {
             stackVisible = !stackVisible;
             stackTitle->setVisible(stackVisible);
             stackView->setVisible(stackVisible);
+            stackPanel->setVisible(stackVisible);
         } else {
             memory->setSectionVisible(section, !memory->sectionVisible(section));
         }
@@ -200,7 +324,7 @@ MainWindow::MainWindow() {
     });
     horizontal->addWidget(mem);
     horizontal->setSizes({640, 760});
-    left->setSizes({470, 390});
+    left->setSizes({350, 390, 140});
     setCentralWidget(horizontal);
     moveOverlay = new MoveOverlay(this);
     auto cancelVisibleMove = [this] {
@@ -211,6 +335,7 @@ MainWindow::MainWindow() {
     };
     connect(horizontal, &QSplitter::splitterMoved, this, cancelVisibleMove);
     connect(left, &QSplitter::splitterMoved, this, cancelVisibleMove);
+    connect(memorySplitter, &QSplitter::splitterMoved, this, cancelVisibleMove);
     for (auto table : {ram, registerView, stackView}) {
         connect(table->verticalScrollBar(), &QScrollBar::valueChanged, this, cancelVisibleMove);
         connect(table->horizontalScrollBar(), &QScrollBar::valueChanged, this, cancelVisibleMove);
@@ -300,10 +425,75 @@ void MainWindow::syncActions() {
                             builtSource == editor->toPlainText());
     stepAction->setEnabled(active && engine.paused() && !moveBusy);
     stopAction->setEnabled(active);
+    argumentsEdit->setReadOnly(active || building);
+}
+void MainWindow::showProgramArguments() {
+    cancelMove();
+    syncActions();
+    argumentsBar->show();
+    argumentsEdit->setFocus(Qt::ShortcutFocusReason);
+    argumentsEdit->selectAll();
+}
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (stackView && event->type() == QEvent::Wheel &&
+        (watched == stackView->viewport() || watched == stackView->verticalScrollBar())) {
+        auto wheel = static_cast<QWheelEvent *>(event);
+        int steps = 0;
+        if (wheel->angleDelta().y()) {
+            stackWheelRemainder += wheel->angleDelta().y();
+            steps = stackWheelRemainder / 120;
+            stackWheelRemainder %= 120;
+        } else if (wheel->pixelDelta().y()) {
+            stackPixelRemainder += wheel->pixelDelta().y();
+            const int rowHeight = stackView->verticalHeader()->defaultSectionSize();
+            steps = stackPixelRemainder / rowHeight;
+            stackPixelRemainder %= rowHeight;
+        } else {
+            return QMainWindow::eventFilter(watched, event);
+        }
+        auto scroll = stackView->verticalScrollBar();
+        scroll->setValue(scroll->value() - steps);
+        wheel->accept();
+        return true;
+    }
+    if (event->type() == QEvent::ContextMenu) {
+        auto context = static_cast<QContextMenuEvent *>(event);
+        auto widget = qobject_cast<QWidget *>(watched);
+        if (watched == startButton ||
+            (widget && widget == startButton->parentWidget() &&
+             startButton->rect().contains(startButton->mapFromGlobal(context->globalPos())))) {
+            showProgramArguments();
+            context->accept();
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 void MainWindow::showError(QString text) {
     statusBar()->showMessage(text);
     QMessageBox::warning(this, "ASM101", text);
+}
+void MainWindow::appendStandardOutput(const QByteArray &data) {
+    const QString text = stdoutDecoder(data);
+    if (text.isEmpty())
+        return;
+    auto scroll = stdoutView->verticalScrollBar();
+    const bool follow = scroll->value() == scroll->maximum();
+    QTextCursor cursor(stdoutView->document());
+    cursor.movePosition(QTextCursor::End);
+    cursor.insertText(text);
+    // Bound long single-line output as well as the number of retained lines.
+    const int excess = stdoutView->document()->characterCount() - 1 - 1024 * 1024;
+    if (excess > 0) {
+        cursor.movePosition(QTextCursor::Start);
+        int end = excess;
+        if (stdoutView->document()->characterAt(end).isLowSurrogate())
+            ++end;
+        cursor.setPosition(end, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+    }
+    if (follow)
+        scroll->setValue(scroll->maximum());
 }
 bool MainWindow::save() {
     if (sourcePath.isEmpty())
@@ -402,8 +592,6 @@ void MainWindow::updateSnapshot() {
     updateFlagDisplay();
     memory->refresh();
     stackMemory->refresh();
-    stackTitle->setText(QString("STACK · RSP 0x%1 · 10 × 8 B")
-                            .arg(engine.registers.value("rsp"), 16, 16, QChar('0')));
     animateMove();
     syncActions();
     statusBar()->showMessage("Stopped · next machine instruction ready · F10 to step");
@@ -447,12 +635,16 @@ void MainWindow::stepInstruction() {
     if (!pendingMove)
         pendingMove = decodePop(engine.instruction, engine.registers, engine.rip,
                                 engine.instructionSize, engine.line);
+    if (!pendingMove)
+        pendingMove = decodePush(engine.instruction, engine.registers, engine.rip,
+                                 engine.instructionSize, engine.line);
     moveBusy = pendingMove.has_value();
     syncActions();
-    // Capture ADD operands and the original stack value before POP changes RSP.
-    if (pendingMove && pendingMove->operation != MoveTransfer::Mov &&
-        (pendingMove->source.kind == MoveOperand::Memory ||
-         pendingMove->destination.kind == MoveOperand::Memory)) {
+    // Read sources before PUSH/POP can change RSP or overwrite aliased memory.
+    if (pendingMove && ((pendingMove->source.kind == MoveOperand::Memory &&
+                         pendingMove->operation != MoveTransfer::Mov) ||
+                        (pendingMove->destination.kind == MoveOperand::Memory &&
+                         pendingMove->operation == MoveTransfer::Add))) {
         const bool sourceMemory = pendingMove->source.kind == MoveOperand::Memory;
         const auto operand = sourceMemory ? pendingMove->source : pendingMove->destination;
         const int epoch = moveEpoch;
@@ -572,6 +764,23 @@ void MainWindow::animateMove() {
             syncActions();
             return;
         }
+        if (move.operation == MoveTransfer::Push || move.operation == MoveTransfer::Pop) {
+            // Bring the participating registers/bytes into view before locating endpoints.
+            for (const auto &operand : {move.source, move.destination}) {
+                if (operand.kind == MoveOperand::Register) {
+                    const int row = registers->names.indexOf(operand.reg);
+                    if (row >= 0)
+                        registerView->scrollTo(registers->index(row, 1));
+                } else if (operand.kind == MoveOperand::Memory) {
+                    MemoryModel *model =
+                        memory->validAddress(operand.address) ? memory : stackMemory;
+                    QTableView *view = model == memory ? ram : stackView;
+                    const int row = model->rowForAddress(operand.address);
+                    if (row >= 0 && view->isVisible())
+                        view->scrollTo(model->index(row, 1));
+                }
+            }
+        }
         const auto from = operandPoint(move.source, move.sourceLine);
         const auto to = operandPoint(move.destination, move.sourceLine);
         if (!from || !to) {
@@ -593,9 +802,10 @@ void MainWindow::animateMove() {
                 moveBusy = false;
                 syncActions();
             },
-            addition                              ? "ADD"
-            : move.operation == MoveTransfer::Pop ? "POP"
-                                                  : "MOV");
+            addition                               ? "ADD"
+            : move.operation == MoveTransfer::Pop  ? "POP"
+            : move.operation == MoveTransfer::Push ? "PUSH"
+                                                   : "MOV");
     };
     if (move.destination.kind == MoveOperand::Register) {
         if (!engine.registers.contains(move.destination.reg))
@@ -711,24 +921,60 @@ void MainWindow::updateTextLayout() {
 }
 
 void MainWindow::updateStackLayout() {
+    if (engine.registers.contains("rsp")) {
+        const auto stackColor = themeColor("#ead55e", "#916000").name();
+        const auto baseColor = themeColor("#b9cce0", "#344a60").name();
+        stackTitle->setText(QString("STACK · <a href='rsp' style='color:%1'>stack (RSP) 0x%2</a>"
+                                    " · <a href='rbp' style='color:%3'>base (RBP) 0x%4</a>")
+                                .arg(stackColor)
+                                .arg(engine.registers.value("rsp"), 16, 16, QChar('0'))
+                                .arg(baseColor)
+                                .arg(engine.registers.value("rbp"), 16, 16, QChar('0')));
+    }
     const int rowHeight = stackView->verticalHeader()->defaultSectionSize();
-    int contentHeight = 0;
-    for (int row = 0; row < stackMemory->rowCount(); ++row) {
+    QSet<int> pointerRows;
+    for (const auto &name : {QString("rsp"), QString("rbp")}) {
+        if (!engine.registers.contains(name))
+            continue;
+        const int row = stackMemory->rowForAddress(engine.registers.value(name));
+        if (row >= 0)
+            pointerRows.insert(row);
+    }
+    const auto affected = stackPointerRows | pointerRows;
+    for (int row : affected) {
+        if (row < 0 || row >= stackMemory->rowCount())
+            continue;
         const int height =
             rowHeight + MemoryDelegate::pointerLabelHeight(stackMemory, row, stackView->font());
-        stackView->setRowHeight(row, height);
-        contentHeight += height;
+        if (stackView->rowHeight(row) != height)
+            stackView->setRowHeight(row, height);
     }
+    stackPointerRows = pointerRows;
     const int chrome = stackView->horizontalHeader()->sizeHint().height() +
                        2 * stackView->frameWidth() +
                        stackView->horizontalScrollBar()->sizeHint().height();
-    const int fullHeight = contentHeight + chrome;
-    if (qApp->property("doubleText").toBool()) {
-        stackView->setMinimumHeight(3 * rowHeight + chrome);
-        stackView->setMaximumHeight(fullHeight);
-        stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    } else {
-        stackView->setFixedHeight(fullHeight);
-        stackView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    stackView->setMinimumHeight(3 * rowHeight + chrome);
+    const auto rsp = engine.registers.constFind("rsp");
+    if (rsp != engine.registers.cend() &&
+        (stackScrollPending || !lastStackPointer || *lastStackPointer != rsp.value())) {
+        lastStackPointer = rsp.value();
+        if (stackMemory->rowForAddress(rsp.value()) < 0)
+            return;
+        stackScrollPending = false;
+        // Apply row/footer geometry before positioning, and before starting any
+        // transfer animation. A delayed scroll would cancel that animation.
+        focusStackPointer("rsp");
     }
+}
+void MainWindow::focusStackPointer(const QString &name) {
+    const auto pointer = engine.registers.constFind(name);
+    if (pointer == engine.registers.cend())
+        return;
+    const int row = stackMemory->rowForAddress(pointer.value());
+    if (row < 0) {
+        statusBar()->showMessage(name.toUpper() + " is outside the displayed stack range.");
+        return;
+    }
+    stackView->doItemsLayout();
+    stackView->scrollTo(stackMemory->index(row, 1), QAbstractItemView::PositionAtCenter);
 }

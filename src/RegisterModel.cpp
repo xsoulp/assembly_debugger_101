@@ -66,7 +66,7 @@ void RegisterModel::updateValues(QMap<QString, quint64> next) {
         if (values.contains(name) && values[name] != next[name])
             changed.insert(name);
     values = next;
-    emit dataChanged(index(0, 0), index(8, 2));
+    emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
 }
 
 void RegisterModel::setSignedDecimal(bool enabled) {

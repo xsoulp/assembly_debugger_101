@@ -6,15 +6,16 @@
 #include <QToolTip>
 #include <QAbstractItemView>
 #include <QFont>
+#include <QMouseEvent>
 #include <climits>
 MemoryModel::MemoryModel(DebuggerEngine *e, QObject *p, Mode mode)
     : QAbstractTableModel(p), engine(e), mode(mode) {}
 int MemoryModel::rowCount(const QModelIndex &p) const {
-    return p.isValid() ? 0 : (mode == Stack ? 10 : rows);
+    return p.isValid() ? 0 : (mode == Stack && !haveStack ? 10 : rows);
 }
 quint64 MemoryModel::address(int row) const {
     if (mode == Stack)
-        return haveStack && row >= 0 && row < 10 ? stackBase + quint64(row) * 8 : ~quint64(0);
+        return haveStack && row >= 0 && row < rows ? stackBase + quint64(row) * 8 : ~quint64(0);
     for (auto s : spans)
         if (row >= s.first && quint64(row - s.first) < s.rows)
             return s.base + quint64(row - s.first) * 8;
@@ -30,7 +31,7 @@ int MemoryModel::rowForAddress(quint64 address) const {
 }
 bool MemoryModel::validAddress(quint64 a) const {
     if (mode == Stack)
-        return haveStack && a >= stackBase && a - stackBase < 80;
+        return haveStack && a >= stackBase && (a - stackBase) / 8 < quint64(rows);
     for (auto s : engine->sections)
         if (sectionVisible(s.name) && a >= s.address && a - s.address < s.size)
             return true;
@@ -52,11 +53,14 @@ QColor MemoryModel::sectionColor(quint64 a) const {
     return themeColor("#101820", "#ffffff");
 }
 void MemoryModel::resetSections() {
+    asciiBytes.clear();
     if (mode == Stack) {
         beginResetModel();
         ++generation;
         haveStack = false;
-        stackBytes.clear();
+        rows = 0;
+        cache.clear();
+        requested.clear();
         modified.clear();
         endResetModel();
         return;
@@ -111,7 +115,13 @@ void MemoryModel::rebuildSpans() {
 void MemoryModel::fetch(quint64 page, bool compare) {
     if (requested.contains(page) || !engine->paused())
         return;
+    if (mode == Stack && !validAddress(page) && !validAddress(page + 255))
+        return;
     requested.insert(page);
+    if (mode == Stack) {
+        fetchStack(page, compare);
+        return;
+    }
     int epoch = generation;
     // Split reads at ELF boundaries so inaccessible gaps are never invented as zeros.
     for (auto s : engine->sections) {
@@ -150,10 +160,6 @@ void MemoryModel::fetch(quint64 page, bool compare) {
     }
 }
 int MemoryModel::byte(quint64 a) const {
-    if (mode == Stack) {
-        auto it = stackBytes.constFind(a);
-        return it == stackBytes.cend() ? -1 : int(it.value());
-    }
     if (!validAddress(a))
         return -1;
     quint64 page = a & ~quint64(255);
@@ -164,6 +170,67 @@ int MemoryModel::byte(quint64 a) const {
     auto it = cache.constFind(page);
     int off = int(a - page);
     return it != cache.cend() && it->size() == 512 && (*it)[256 + off] ? uchar((*it)[off]) : -1;
+}
+
+static QString asciiText(int value) {
+    if (value == 0)
+        return "\\0";
+    if (value == 9)
+        return "\\t";
+    if (value == 10)
+        return "\\n";
+    if (value == 13)
+        return "\\r";
+    if (value == 32)
+        return QString(QChar(0x2420)); // Visible space.
+    if (value >= 33 && value <= 126)
+        return QString(QChar(value));
+    return QString(QChar(0x00b7)); // Control bytes and values outside ASCII.
+}
+
+QString MemoryModel::byteText(quint64 address) const {
+    const int value = byte(address);
+    if (value < 0)
+        return "??";
+    return showsAscii(address) ? asciiText(value)
+                               : QString("%1").arg(value, 2, 16, QChar('0')).toUpper();
+}
+
+QString MemoryModel::byteTooltip(quint64 address) const {
+    const int value = byte(address);
+    if (value < 0)
+        return {};
+    QString ascii;
+    if (value == 32)
+        ascii = "SPACE";
+    else if (value == 127)
+        ascii = "DEL (control character)";
+    else if (value >= 128)
+        ascii = "outside ASCII (0–127)";
+    else if (value < 32 && value != 0 && value != 9 && value != 10 && value != 13)
+        ascii = "control character";
+    else
+        ascii = asciiText(value);
+    QString text = QString("0x%1 · hex %2 · decimal %3 · ASCII %4\nClick to show %5.")
+                       .arg(address, 16, 16, QChar('0'))
+                       .arg(QString("%1").arg(value, 2, 16, QChar('0')).toUpper())
+                       .arg(value)
+                       .arg(ascii, showsAscii(address) ? "hex" : "ASCII");
+    if (!symbolsAt(address).isEmpty())
+        text.prepend(symbolsAt(address).join(" / ") + '\n');
+    return text;
+}
+
+bool MemoryModel::toggleAscii(quint64 address) {
+    if (!validAddress(address) || byte(address) < 0)
+        return false;
+    if (asciiBytes.contains(address))
+        asciiBytes.remove(address);
+    else
+        asciiBytes.insert(address);
+    const int row = rowForAddress(address);
+    emit dataChanged(index(row, 1), index(row, 1), {Qt::DisplayRole});
+    return true;
 }
 void MemoryModel::refresh() {
     if (mode == Stack) {
@@ -222,8 +289,7 @@ QVariant MemoryModel::data(const QModelIndex &i, int role) const {
                 values << "  ";
                 continue;
             }
-            int b = byte(a + n);
-            values << (b < 0 ? QString("??") : QString("%1").arg(b, 2, 16, QChar('0')).toUpper());
+            values << byteText(a + n);
         }
         return values.join(' ');
     }
@@ -284,13 +350,14 @@ QString MemoryModel::symbolTooltip(quint64 a) const {
 
 int MemoryDelegate::byteWidth(const QFontMetrics &metrics, int columnWidth) {
     // Spread the eight bytes across the available column, keeping room for labels.
-    const int minimum = qMax(34, metrics.horizontalAdvance("00 ") + 4);
+    const int minimum = qMax(40, metrics.horizontalAdvance("00 ") + 4);
     return qMax(minimum, (columnWidth - 20) / 8);
 }
 
 QFont MemoryDelegate::pointerLabelFont(const QFont &font) {
     QFont label = font;
-    label.setPointSizeF(qMax(7.0, font.pointSizeF() * 0.65));
+    label.setPointSizeF(qMax(9.0, font.pointSizeF() * 0.65));
+    label.setBold(true);
     label.setUnderline(false);
     return label;
 }
@@ -346,9 +413,7 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
             p->setFont(o.font);
             p->setPen(m->changed(a + n) ? themeColor("#64f0a0", "#006b35")
                                         : themeColor("#e0e8f1", "#17212b"));
-            const int b = m->byte(a + n);
-            p->drawText(r, Qt::AlignCenter,
-                        b < 0 ? "??" : QString("%1").arg(b, 2, 16, QChar('0')).toUpper());
+            p->drawText(r, Qt::AlignCenter, m->byteText(a + n));
             if (m->changed(a + n))
                 p->fillRect(r.adjusted(2, r.height() - 3, -2, 0), themeColor("#64f0a0", "#006b35"));
 
@@ -387,6 +452,29 @@ void MemoryDelegate::paint(QPainter *p, const QStyleOptionViewItem &o, const QMo
     p->restore();
 }
 
+bool MemoryDelegate::editorEvent(QEvent *event, QAbstractItemModel *model,
+                                 const QStyleOptionViewItem &option, const QModelIndex &index) {
+    if (event->type() != QEvent::MouseButtonRelease || index.column() != 1)
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
+    auto mouse = static_cast<QMouseEvent *>(event);
+    if (mouse->button() != Qt::LeftButton)
+        return false;
+    auto memory = static_cast<MemoryModel *>(model);
+    const auto base = memory->address(index.row());
+    if (base == ~quint64(0))
+        return false;
+    const int width = byteWidth(option.fontMetrics, option.rect.width());
+    const int x = mouse->position().toPoint().x() - option.rect.x() - 10;
+    const int offset = x / width;
+    if (x < 0 || offset >= 8)
+        return false;
+    const int header = memory->hasSymbols(index.row()) ? option.fontMetrics.height() + 2 : 0;
+    const int footer = pointerLabelHeight(memory, index.row(), option.font);
+    const QRect byteRect(option.rect.x() + 10 + offset * width, option.rect.y() + header + 1,
+                         width - 2, option.rect.height() - header - footer - 2);
+    return byteRect.contains(mouse->position().toPoint()) && memory->toggleAscii(base + offset);
+}
+
 bool MemoryDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view,
                                const QStyleOptionViewItem &option, const QModelIndex &index) {
     const auto model = static_cast<const MemoryModel *>(index.model());
@@ -397,14 +485,28 @@ bool MemoryDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view,
     const int byte = offset / byteWidth(option.fontMetrics, option.rect.width());
     if (base != ~quint64(0) && offset >= 0 && byte < 8) {
         int symbolByte = byte;
-        if (model->hasSymbols(index.row()) &&
-            event->pos().y() < option.rect.y() + option.fontMetrics.height() + 2)
+        const bool symbolHeader =
+            model->hasSymbols(index.row()) &&
+            event->pos().y() < option.rect.y() + option.fontMetrics.height() + 2;
+        if (symbolHeader)
             while (symbolByte > 0 && model->symbolsAt(base + symbolByte).isEmpty())
                 --symbolByte;
-        if (!model->symbolsAt(base + symbolByte).isEmpty()) {
+        if (symbolHeader && !model->symbolsAt(base + symbolByte).isEmpty()) {
             QToolTip::showText(event->globalPos(),
                                model->symbolTooltip(base + symbolByte).toHtmlEscaped(), view);
             return true;
+        }
+        const int header = model->hasSymbols(index.row()) ? option.fontMetrics.height() + 2 : 0;
+        const int footer = pointerLabelHeight(model, index.row(), option.font);
+        if (event->pos().y() >= option.rect.y() + header + 1 &&
+            event->pos().y() < option.rect.bottom() - footer) {
+            const auto text = model->byteTooltip(base + byte);
+            if (!text.isEmpty()) {
+                QToolTip::showText(event->globalPos(),
+                                   "<qt>" + text.toHtmlEscaped().replace('\n', "<br>") + "</qt>",
+                                   view);
+                return true;
+            }
         }
     }
     QToolTip::hideText();
@@ -414,41 +516,79 @@ bool MemoryDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view,
 void MemoryModel::refreshStack() {
     if (!engine->paused() || !engine->registers.contains("rsp"))
         return;
-    const auto previous = stackBytes;
-    if (!haveStack) {
-        // Keep the initial RSP on the bottom row as the stack grows upward in the view.
-        stackBase = engine->registers["rsp"] - 9 * 8;
-        haveStack = true;
-    }
-    stackBytes.clear();
+    ++generation;
+    requested.clear();
     modified.clear();
-    const int epoch = ++generation;
-    const quint64 base = stackBase;
-    emit dataChanged(index(0, 0), index(9, 1));
-    auto install = [this, previous, epoch](quint64 address, const QByteArray &data) {
+    if (!haveStack) {
+        beginResetModel();
+        // A virtual 128 KiB window, loaded only as it is visited. Keep addresses
+        // stable during the run so scrolling and PUSH/POP can be compared in place.
+        const quint64 rsp = engine->registers["rsp"] & ~quint64(7);
+        stackBase = rsp >= 65536 ? rsp - 65536 : 0;
+        const quint64 last = rsp <= ~quint64(0) - 65535 ? rsp + 65535 : ~quint64(0);
+        rows = int((last - stackBase) / 8 + 1);
+        haveStack = true;
+        endResetModel();
+    }
+    const auto pages = cache.keys();
+    for (auto page : pages)
+        if (cache.contains(page))
+            fetch(page, true);
+    const quint64 rsp = engine->registers["rsp"];
+    if (validAddress(rsp))
+        fetch(rsp & ~quint64(255), true);
+    emit dataChanged(index(0, 0), index(rows - 1, 1));
+}
+
+void MemoryModel::fetchStack(quint64 page, bool compare) {
+    const int epoch = generation;
+    const auto previous = cache.value(page);
+    // Reset validity while refreshing: unreadable memory must not retain old values.
+    cache[page] = QByteArray(512, char(0));
+    auto install = [this, previous, page, epoch, compare](quint64 address, const QByteArray &data) {
         if (epoch != generation)
             return;
+        auto &bytes = cache[page];
+        if (bytes.isEmpty())
+            bytes = QByteArray(512, char(0));
         for (int n = 0; n < data.size(); ++n) {
             const quint64 a = address + n;
-            if (!validAddress(a))
+            if (a < page || a - page >= 256)
                 break;
+            if (!validAddress(a))
+                continue;
+            const int offset = int(a - page);
             const uchar value = uchar(data[n]);
-            if (previous.contains(a) && previous[a] != value)
+            if (compare && previous.size() == 512 && previous[256 + offset] &&
+                uchar(previous[offset]) != value)
                 modified.insert(a);
-            stackBytes[a] = value;
+            bytes[offset] = char(value);
+            bytes[256 + offset] = 1;
         }
-        emit dataChanged(index(0, 0), index(9, 1));
+        while (cache.size() > 128) {
+            auto it = cache.begin();
+            if (it.key() == page)
+                ++it;
+            requested.remove(it.key());
+            cache.erase(it);
+        }
+        const int first = rowForAddress(qMax(page, stackBase));
+        const int last = rowForAddress(qMin(page + 255, stackBase + quint64(rows) * 8 - 1));
+        if (first >= 0 && last >= first)
+            emit dataChanged(index(first, 0), index(last, 1));
     };
-    // Normally a single 80-byte read. Retry by row if the block straddles unreadable memory.
-    engine->readMemory(base, 80, [this, base, epoch, install](QByteArray data) {
+    // Retry one row at a time when a page crosses an unreadable mapping boundary.
+    engine->readMemory(page, 256, [this, page, epoch, install](QByteArray data) {
         if (epoch != generation)
             return;
-        if (data.size() == 80) {
-            install(base, data);
+        if (data.size() == 256) {
+            install(page, data);
             return;
         }
-        for (int row = 0; row < 10; ++row) {
-            const quint64 address = base + row * 8;
+        for (int row = 0; row < 32; ++row) {
+            const quint64 address = page + row * 8;
+            if (!validAddress(address))
+                continue;
             engine->readMemory(address, 8, [install, address](QByteArray bytes) {
                 install(address, bytes);
             });
